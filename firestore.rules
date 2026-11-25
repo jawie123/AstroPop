@@ -1,0 +1,162 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidPlayerProfile(data, userId) {
+      return data.userId is string && data.userId == userId && data.userId.size() <= 128 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 50 &&
+             data.highestUnlockedLevel is int && data.highestUnlockedLevel >= 1 && data.highestUnlockedLevel <= 30 &&
+             data.totalStars is int && data.totalStars >= 0 && data.totalStars <= 500 &&
+             data.endlessHighScore is int && data.endlessHighScore >= 0 && data.endlessHighScore <= 100000000 &&
+             data.totalBubblesPopped is int && data.totalBubblesPopped >= 0 && data.totalBubblesPopped <= 100000000 &&
+             (!('starCoins' in data) || (data.starCoins is int && data.starCoins >= 0 && data.starCoins <= 100000000)) &&
+             (!('dailyStreak' in data) || (data.dailyStreak is int && data.dailyStreak >= 0 && data.dailyStreak <= 3650)) &&
+             (!('lastDailyDay' in data) || (data.lastDailyDay is string && data.lastDailyDay.size() <= 16)) &&
+             data.bombBoosters is int && data.bombBoosters >= 0 && data.bombBoosters <= 999 &&
+             data.prismBoosters is int && data.prismBoosters >= 0 && data.prismBoosters <= 999 &&
+             data.laserBoosters is int && data.laserBoosters >= 0 && data.laserBoosters <= 999 &&
+             data.soundEnabled is bool &&
+             data.hapticsEnabled is bool &&
+             (!('equippedSkin' in data) || (data.equippedSkin is string && data.equippedSkin in ['CYAN_INTERCEPTOR', 'SOLAR_VALKYRIE', 'PLASMA_NOVA', 'VOID_SINGULARITY'])) &&
+             (!('unlockedSkins' in data) || (data.unlockedSkins is list && data.unlockedSkins.size() >= 1 && data.unlockedSkins.size() <= 10)) &&
+             (!('claimedQuests' in data) || (data.claimedQuests is list && data.claimedQuests.size() <= 20)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidLevelProgress(data) {
+      return data.levelNumber is int && data.levelNumber >= 1 && data.levelNumber <= 30 &&
+             data.bestScore is int && data.bestScore >= 0 && data.bestScore <= 10000000 &&
+             data.stars is int && data.stars >= 0 && data.stars <= 3 &&
+             data.completed is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidGameRun(data) {
+      return data.mode is string && data.mode in ['SAGA', 'ENDLESS', 'DAILY'] &&
+             data.levelNumber is int && data.levelNumber >= 0 && data.levelNumber <= 30 &&
+             data.score is int && data.score >= 0 && data.score <= 100000000 &&
+             data.maxCombo is int && data.maxCombo >= 0 && data.maxCombo <= 10000 &&
+             data.bubblesPopped is int && data.bubblesPopped >= 0 && data.bubblesPopped <= 100000 &&
+             data.starsEarned is int && data.starsEarned >= 0 && data.starsEarned <= 3 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if isOwner(userId);
+
+      allow create: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'displayName', 'highestUnlockedLevel', 'totalStars',
+                         'endlessHighScore', 'totalBubblesPopped', 'starCoins',
+                         'dailyStreak', 'lastDailyDay', 'bombBoosters',
+                         'prismBoosters', 'laserBoosters', 'soundEnabled', 'hapticsEnabled',
+                         'equippedSkin', 'unlockedSkins', 'claimedQuests',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'displayName', 'highestUnlockedLevel', 'totalStars',
+                         'endlessHighScore', 'totalBubblesPopped', 'starCoins',
+                         'dailyStreak', 'lastDailyDay', 'bombBoosters',
+                         'prismBoosters', 'laserBoosters', 'soundEnabled', 'hapticsEnabled',
+                         'equippedSkin', 'unlockedSkins', 'claimedQuests',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidPlayerProfile(incoming(), userId);
+
+      allow update: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       isValidPlayerProfile(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'displayName', 'highestUnlockedLevel', 'totalStars',
+                           'endlessHighScore', 'totalBubblesPopped', 'starCoins',
+                           'dailyStreak', 'lastDailyDay', 'bombBoosters',
+                           'prismBoosters', 'laserBoosters', 'equippedSkin',
+                           'unlockedSkins', 'claimedQuests', 'updatedAt'
+                         ]) ||
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'soundEnabled', 'hapticsEnabled', 'updatedAt'
+                         ])
+                       );
+
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      match /levels/{levelId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(levelId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(levelId) &&
+                         incoming().keys().hasAll([
+                           'levelNumber', 'bestScore', 'stars', 'completed', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'levelNumber', 'bestScore', 'stars', 'completed', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidLevelProgress(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(levelId) &&
+                         isValidLevelProgress(incoming()) &&
+                         incoming().levelNumber == existing().levelNumber &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'bestScore', 'stars', 'completed', 'updatedAt'
+                         ]);
+
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(levelId);
+      }
+
+      match /runs/{runId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(runId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(userId) &&
+                         isValidId(runId) &&
+                         incoming().keys().hasAll([
+                           'mode', 'levelNumber', 'score', 'maxCombo', 'bubblesPopped', 'starsEarned', 'createdAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'mode', 'levelNumber', 'score', 'maxCombo', 'bubblesPopped', 'starsEarned', 'createdAt'
+                         ]) &&
+                         isValidGameRun(incoming());
+
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(runId);
+      }
+    }
+  }
+}

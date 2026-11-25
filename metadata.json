@@ -1,0 +1,6 @@
+{
+  "name": "AstroPop",
+  "description": "A cosmic bubble-shooter puzzle arcade game featuring ricochet aiming, floating cluster avalanches, tactical boosters, Starlight Saga levels, and Endless Panic mode.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
