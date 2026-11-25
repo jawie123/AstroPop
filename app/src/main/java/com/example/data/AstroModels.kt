@@ -64,6 +64,54 @@ enum class CosmicQuest(
     }
 }
 
+data class DailySupplyTier(
+    val day: Int,
+    val title: String,
+    val coins: Long,
+    val bombs: Long = 0L,
+    val prisms: Long = 0L,
+    val lasers: Long = 0L
+)
+
+object DailySupplyCatalog {
+    val tiers: List<DailySupplyTier> = listOf(
+        DailySupplyTier(1, "+50 Coins", coins = 50L),
+        DailySupplyTier(2, "+1 Nova Bomb", coins = 25L, bombs = 1L),
+        DailySupplyTier(3, "+90 Coins", coins = 90L),
+        DailySupplyTier(4, "+1 Prism Orb", coins = 30L, prisms = 1L),
+        DailySupplyTier(5, "+130 Coins", coins = 130L),
+        DailySupplyTier(6, "+1 Star Laser", coins = 40L, lasers = 1L),
+        DailySupplyTier(7, "Mega Supply!", coins = 250L, bombs = 1L, prisms = 1L, lasers = 1L)
+    )
+
+    fun nextClaimDay(currentDay: Long): Int = ((currentDay.toInt().coerceIn(0, 7)) % 7) + 1
+    fun tierForDay(day: Int): DailySupplyTier = tiers[(day - 1).coerceIn(0, tiers.lastIndex)]
+}
+
+enum class WheelPrize(
+    val shortLabel: String,
+    val fullLabel: String,
+    val coins: Long,
+    val booster: BoosterType?
+) {
+    COINS_40("+40c", "+40 Star Coins", 40L, null),
+    BOMB_1("Bomb", "+1 Nova Bomb", 0L, BoosterType.BOMB),
+    COINS_100("+100c", "+100 Star Coins", 100L, null),
+    PRISM_1("Prism", "+1 Prism Orb", 0L, BoosterType.PRISM),
+    COINS_65("+65c", "+65 Star Coins", 65L, null),
+    LASER_1("Laser", "+1 Star Laser", 0L, BoosterType.LASER),
+    JACKPOT_200("200c!", "JACKPOT +200 Star Coins!", 200L, null),
+    COINS_120("+120c", "+120 Star Coins", 120L, null)
+}
+
+data class PilotRankInfo(
+    val rankNumber: Int,
+    val title: String,
+    val xp: Long,
+    val nextRankXp: Long?,
+    val progress: Float
+)
+
 sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
     data class Success<T>(val data: T) : UiState<T>
@@ -91,10 +139,39 @@ data class PlayerProfile(
     val equippedSkin: String = CannonSkin.CYAN_INTERCEPTOR.name,
     val unlockedSkins: List<String> = listOf(CannonSkin.CYAN_INTERCEPTOR.name),
     val claimedQuests: List<String> = emptyList(),
+    val loginRewardDay: Long = 0L,
+    val lastLoginRewardDate: String = "",
+    val lastWheelSpinDate: String = "",
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
     fun resolvedSkin(): CannonSkin = CannonSkin.fromId(equippedSkin)
+
+    fun pilotRank(): PilotRankInfo {
+        val xp = totalBubblesPopped * 2L + totalStars * 120L + endlessHighScore / 15L
+        val thresholds = listOf(
+            0L to "Star Cadet",
+            500L to "Orbit Striker",
+            1500L to "Nebula Ace",
+            3500L to "Solar Valkyrie",
+            7000L to "Void Commander",
+            13000L to "Galactic Legend"
+        )
+        var tierIdx = 0
+        for (i in thresholds.indices) {
+            if (xp >= thresholds[i].first) tierIdx = i
+        }
+        val floor = thresholds[tierIdx].first
+        val ceiling = thresholds.getOrNull(tierIdx + 1)?.first
+        val progress = if (ceiling == null) 1f else ((xp - floor).toFloat() / (ceiling - floor).coerceAtLeast(1L)).coerceIn(0f, 1f)
+        return PilotRankInfo(
+            rankNumber = tierIdx + 1,
+            title = thresholds[tierIdx].second,
+            xp = xp,
+            nextRankXp = ceiling,
+            progress = progress
+        )
+    }
 }
 
 @Keep

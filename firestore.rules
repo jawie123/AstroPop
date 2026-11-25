@@ -44,6 +44,9 @@ service cloud.firestore {
              (!('equippedSkin' in data) || (data.equippedSkin is string && data.equippedSkin in ['CYAN_INTERCEPTOR', 'SOLAR_VALKYRIE', 'PLASMA_NOVA', 'VOID_SINGULARITY'])) &&
              (!('unlockedSkins' in data) || (data.unlockedSkins is list && data.unlockedSkins.size() >= 1 && data.unlockedSkins.size() <= 10)) &&
              (!('claimedQuests' in data) || (data.claimedQuests is list && data.claimedQuests.size() <= 20)) &&
+             (!('loginRewardDay' in data) || (data.loginRewardDay is int && data.loginRewardDay >= 0 && data.loginRewardDay <= 7)) &&
+             (!('lastLoginRewardDate' in data) || (data.lastLoginRewardDate is string && data.lastLoginRewardDate.size() <= 16)) &&
+             (!('lastWheelSpinDate' in data) || (data.lastWheelSpinDate is string && data.lastWheelSpinDate.size() <= 16)) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -79,6 +82,7 @@ service cloud.firestore {
                          'dailyStreak', 'lastDailyDay', 'bombBoosters',
                          'prismBoosters', 'laserBoosters', 'soundEnabled', 'hapticsEnabled',
                          'equippedSkin', 'unlockedSkins', 'claimedQuests',
+                         'loginRewardDay', 'lastLoginRewardDate', 'lastWheelSpinDate',
                          'createdAt', 'updatedAt'
                        ]) &&
                        incoming().keys().hasOnly([
@@ -87,6 +91,7 @@ service cloud.firestore {
                          'dailyStreak', 'lastDailyDay', 'bombBoosters',
                          'prismBoosters', 'laserBoosters', 'soundEnabled', 'hapticsEnabled',
                          'equippedSkin', 'unlockedSkins', 'claimedQuests',
+                         'loginRewardDay', 'lastLoginRewardDate', 'lastWheelSpinDate',
                          'createdAt', 'updatedAt'
                        ]) &&
                        isValidPlayerProfile(incoming(), userId);
@@ -102,7 +107,9 @@ service cloud.firestore {
                            'endlessHighScore', 'totalBubblesPopped', 'starCoins',
                            'dailyStreak', 'lastDailyDay', 'bombBoosters',
                            'prismBoosters', 'laserBoosters', 'equippedSkin',
-                           'unlockedSkins', 'claimedQuests', 'updatedAt'
+                           'unlockedSkins', 'claimedQuests',
+                           'loginRewardDay', 'lastLoginRewardDate', 'lastWheelSpinDate',
+                           'updatedAt'
                          ]) ||
                          incoming().diff(existing()).affectedKeys().hasOnly([
                            'soundEnabled', 'hapticsEnabled', 'updatedAt'

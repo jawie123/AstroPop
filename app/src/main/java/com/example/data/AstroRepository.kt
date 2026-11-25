@@ -143,6 +143,9 @@ class AstroRepository(
                     "equippedSkin" to CannonSkin.CYAN_INTERCEPTOR.name,
                     "unlockedSkins" to listOf(CannonSkin.CYAN_INTERCEPTOR.name),
                     "claimedQuests" to emptyList<String>(),
+                    "loginRewardDay" to 0L,
+                    "lastLoginRewardDate" to "",
+                    "lastWheelSpinDate" to "",
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -276,6 +279,33 @@ class AstroRepository(
         }
     }
 
+    suspend fun grantAdRewardCoins(userId: String, coins: Long): Result<Unit> {
+        val safeCoins = coins.coerceIn(1L, 1000L)
+        val path = "users/$userId"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user mismatch" }
+            val docRef = db.collection("users").document(uid)
+            db.runTransaction { tx ->
+                val snap = tx.get(docRef)
+                val currentCoins = (snap.getLong("starCoins") ?: 0L).coerceAtLeast(0L)
+                tx.update(
+                    docRef,
+                    mapOf(
+                        "starCoins" to (currentCoins + safeCoins).coerceAtMost(100_000_000L),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun unlockOrEquipSkin(userId: String, skin: CannonSkin): Result<Unit> {
         val path = "users/$userId"
         return try {
@@ -342,6 +372,102 @@ class AstroRepository(
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
                 when (quest.rewardBooster) {
+                    BoosterType.BOMB -> {
+                        val prev = (snap.getLong("bombBoosters") ?: 0L).coerceAtLeast(0L)
+                        updates["bombBoosters"] = (prev + 1L).coerceAtMost(999L)
+                    }
+                    BoosterType.PRISM -> {
+                        val prev = (snap.getLong("prismBoosters") ?: 0L).coerceAtLeast(0L)
+                        updates["prismBoosters"] = (prev + 1L).coerceAtMost(999L)
+                    }
+                    BoosterType.LASER -> {
+                        val prev = (snap.getLong("laserBoosters") ?: 0L).coerceAtLeast(0L)
+                        updates["laserBoosters"] = (prev + 1L).coerceAtMost(999L)
+                    }
+                    null -> Unit
+                }
+                tx.update(docRef, updates)
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun claimDailySupply(userId: String, todayKey: String): Result<DailySupplyTier> {
+        val safeDate = todayKey.take(16)
+        val path = "users/$userId"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Mismatched userId in claimDailySupply" }
+            val docRef = db.collection("users").document(uid)
+            val tier = db.runTransaction { tx ->
+                val snap = tx.get(docRef)
+                val lastDate = snap.getString("lastLoginRewardDate") ?: ""
+                if (lastDate == safeDate) {
+                    throw IllegalStateException("Today's Star Supply already claimed!")
+                }
+                val currentDay = (snap.getLong("loginRewardDay") ?: 0L).coerceIn(0L, 7L)
+                val nextDay = DailySupplyCatalog.nextClaimDay(currentDay)
+                val reward = DailySupplyCatalog.tierForDay(nextDay)
+                val coins = (snap.getLong("starCoins") ?: 0L).coerceAtLeast(0L)
+                val bombs = (snap.getLong("bombBoosters") ?: 0L).coerceAtLeast(0L)
+                val prisms = (snap.getLong("prismBoosters") ?: 0L).coerceAtLeast(0L)
+                val lasers = (snap.getLong("laserBoosters") ?: 0L).coerceAtLeast(0L)
+
+                tx.update(
+                    docRef,
+                    mapOf(
+                        "starCoins" to (coins + reward.coins).coerceAtMost(100_000_000L),
+                        "bombBoosters" to (bombs + reward.bombs).coerceAtMost(999L),
+                        "prismBoosters" to (prisms + reward.prisms).coerceAtMost(999L),
+                        "laserBoosters" to (lasers + reward.lasers).coerceAtMost(999L),
+                        "loginRewardDay" to nextDay.toLong(),
+                        "lastLoginRewardDate" to safeDate,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                reward
+            }.await()
+            Result.success(tier)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun claimWheelPrize(
+        userId: String,
+        prize: WheelPrize,
+        todayKey: String,
+        isFreeDaily: Boolean
+    ): Result<Unit> {
+        val safeDate = todayKey.take(16)
+        val path = "users/$userId"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Mismatched userId in claimWheelPrize" }
+            val docRef = db.collection("users").document(uid)
+            db.runTransaction { tx ->
+                val snap = tx.get(docRef)
+                val lastSpinDate = snap.getString("lastWheelSpinDate") ?: ""
+                if (isFreeDaily && lastSpinDate == safeDate) {
+                    throw IllegalStateException("Daily free spin already used today!")
+                }
+                val coins = (snap.getLong("starCoins") ?: 0L).coerceAtLeast(0L)
+                val updates = mutableMapOf<String, Any>(
+                    "starCoins" to (coins + prize.coins).coerceAtMost(100_000_000L),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                if (isFreeDaily) {
+                    updates["lastWheelSpinDate"] = safeDate
+                }
+                when (prize.booster) {
                     BoosterType.BOMB -> {
                         val prev = (snap.getLong("bombBoosters") ?: 0L).coerceAtLeast(0L)
                         updates["bombBoosters"] = (prev + 1L).coerceAtMost(999L)

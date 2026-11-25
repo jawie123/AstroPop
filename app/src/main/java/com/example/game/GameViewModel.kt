@@ -72,7 +72,9 @@ data class GameUiState(
     val bossMaxHp: Int = 0,
     val bossCounterCountdown: Int = 0,
     val isDangerPanic: Boolean = false,
+    val swapHintPulse: Boolean = false,
     val canBuySecondChance: Boolean = false,
+    val canWatchAdSecondChance: Boolean = false,
     val usedSecondChance: Boolean = false,
     val bombCount: Int = 0,
     val prismCount: Int = 0,
@@ -350,11 +352,28 @@ class GameViewModel(
                         status = GameStatus.PLAYING,
                         movesRemaining = it.movesRemaining + 5,
                         canBuySecondChance = false,
+                        canWatchAdSecondChance = false,
                         usedSecondChance = true,
                         starCoins = (it.starCoins - SECOND_CHANCE_COST).coerceAtLeast(0L)
                     )
                 }
             }
+        }
+    }
+
+    fun grantSecondChanceFromAd() {
+        val s = _state.value
+        if (!s.canWatchAdSecondChance || s.usedSecondChance) return
+        resultSaved = false
+        soundSynth.playOverdrive()
+        _state.update {
+            it.copy(
+                status = GameStatus.PLAYING,
+                movesRemaining = it.movesRemaining + 5,
+                canBuySecondChance = false,
+                canWatchAdSecondChance = false,
+                usedSecondChance = true
+            )
         }
     }
 
@@ -1096,7 +1115,8 @@ class GameViewModel(
             GameMode.ENDLESS -> dangerReached
         }
 
-        val moveBonus = if (isVictory && s.mode != GameMode.ENDLESS) nextMoves * 120L else 0L
+        val moveBonus = if (isVictory && s.mode != GameMode.ENDLESS) nextMoves * 150L else 0L
+        val fireworksBonusCoins = if (isVictory && s.mode != GameMode.ENDLESS && nextMoves > 0) nextMoves * 3L else 0L
         val finalScore = s.score + gainedScore + bossClearBonusScore + moveBonus
         val totalPopped = s.totalPoppedInRun + matchedCount
 
@@ -1140,8 +1160,8 @@ class GameViewModel(
         } else null
 
         val baseCoinsEarned = when {
-            nextStatus == GameStatus.WON && s.mode == GameMode.DAILY -> 120L + starsEarned * 15L
-            nextStatus == GameStatus.WON && s.mode == GameMode.SAGA -> 35L + starsEarned * 15L + bossClearBonusCoins
+            nextStatus == GameStatus.WON && s.mode == GameMode.DAILY -> 120L + starsEarned * 15L + fireworksBonusCoins
+            nextStatus == GameStatus.WON && s.mode == GameMode.SAGA -> 35L + starsEarned * 15L + bossClearBonusCoins + fireworksBonusCoins
             nextStatus == GameStatus.LOST && s.mode == GameMode.ENDLESS -> (totalPopped / 3L).coerceAtLeast(10L)
             nextStatus == GameStatus.LOST -> (totalPopped / 5L).coerceAtLeast(5L)
             else -> 0L
@@ -1150,8 +1170,30 @@ class GameViewModel(
 
         if (nextStatus == GameStatus.WON) {
             soundSynth.playVictory()
+            if (nextMoves > 0 && s.mode != GameMode.ENDLESS) {
+                spawnPopParticles(mutableParticles, shooterPos, AstroGold, 22, isStar = true)
+                mutableShockwaves.add(ShockwaveFx(shooterPos, boardWidth * 0.6f, AstroGold))
+                mutablePopups.add(
+                    FloatingPopup(
+                        ++popupCounter,
+                        shooterPos.x,
+                        shooterPos.y - 80f,
+                        "FIREWORKS! +$moveBonus & +${fireworksBonusCoins}c",
+                        AstroGold
+                    )
+                )
+            }
         } else if (nextStatus == GameStatus.LOST) {
             soundSynth.playGameOver()
+        } else if (nextCombo >= 3 && didClear) {
+            val hypeText = when {
+                nextCombo >= 8 -> "COSMIC GODLIKE ${nextCombo}x!"
+                nextCombo >= 5 -> "SUPERNOVA ${nextCombo}x!"
+                else -> "STELLAR ${nextCombo}x!"
+            }
+            mutablePopups.add(
+                FloatingPopup(++popupCounter, shooterPos.x, shooterPos.y - 110f, hypeText, AstroGold)
+            )
         }
 
         if (feverBonusShot != null && nextStatus == GameStatus.PLAYING) {
@@ -1173,11 +1215,21 @@ class GameViewModel(
             screenShake = extraShake
         )
 
-        val canSecondChance = nextStatus == GameStatus.LOST &&
+        val canAdSecondChance = nextStatus == GameStatus.LOST &&
             s.mode != GameMode.ENDLESS &&
             !dangerReached &&
-            !s.usedSecondChance &&
-            s.starCoins >= SECOND_CHANCE_COST
+            !s.usedSecondChance
+        val canSecondChance = canAdSecondChance && s.starCoins >= SECOND_CHANCE_COST
+
+        val exposedColors = newGrid.values
+            .filter { it.row >= (newGrid.keys.maxOfOrNull { k -> k.first } ?: 0) - 2 }
+            .map { it.color }
+            .toSet()
+        val suggestSwap = nextStatus == GameStatus.PLAYING &&
+            queuedCurrent.shotType == ShotType.COLORED &&
+            queuedCurrent.color !in exposedColors &&
+            queuedNext.shotType == ShotType.COLORED &&
+            queuedNext.color in exposedColors
 
         _state.update {
             it.copy(
@@ -1201,14 +1253,16 @@ class GameViewModel(
                 earnedBooster = rewardBooster,
                 coinsEarnedThisRun = coinsEarned,
                 canBuySecondChance = canSecondChance,
+                canWatchAdSecondChance = canAdSecondChance,
                 isDangerPanic = panic,
+                swapHintPulse = suggestSwap,
                 hapticPulseId = if (didClear && it.hapticsEnabled) it.hapticPulseId + 1 else it.hapticPulseId
             )
         }
 
         recomputeTrajectory()
 
-        if ((nextStatus == GameStatus.WON || nextStatus == GameStatus.LOST) && !resultSaved && !canSecondChance) {
+        if ((nextStatus == GameStatus.WON || nextStatus == GameStatus.LOST) && !resultSaved && !canSecondChance && !canAdSecondChance) {
             saveRunNow(nextStatus == GameStatus.WON)
         }
     }

@@ -22,6 +22,9 @@
         "equippedSkin": { "type": "string", "description": "Equipped Star-Cannon cosmetic skin ID." },
         "unlockedSkins": { "type": "array", "items": { "type": "string" }, "description": "Unlocked Star-Cannon skin IDs." },
         "claimedQuests": { "type": "array", "items": { "type": "string" }, "description": "Claimed Cosmic Quest milestone IDs." },
+        "loginRewardDay": { "type": "integer", "description": "Current 7-day daily supply streak count (0-7)." },
+        "lastLoginRewardDate": { "type": "string", "description": "ISO date string (YYYY-MM-DD) of last claimed daily supply." },
+        "lastWheelSpinDate": { "type": "string", "description": "ISO date string (YYYY-MM-DD) of last free Lucky Wheel spin." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp when profile was created." },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp of last update." }
       },
@@ -43,6 +46,9 @@
         "equippedSkin",
         "unlockedSkins",
         "claimedQuests",
+        "loginRewardDay",
+        "lastLoginRewardDate",
+        "lastWheelSpinDate",
         "createdAt",
         "updatedAt"
       ]

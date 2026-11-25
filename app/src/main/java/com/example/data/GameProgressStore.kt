@@ -19,8 +19,11 @@ interface GameProgressStore {
     suspend fun consumeBooster(booster: BoosterType): Result<Unit>
     suspend fun purchaseBooster(booster: BoosterType): Result<Unit>
     suspend fun spendCoinsForExtraShots(cost: Long): Result<Unit>
+    suspend fun grantAdRewardCoins(coins: Long): Result<Unit>
     suspend fun unlockOrEquipSkin(skin: CannonSkin): Result<Unit>
     suspend fun claimQuest(quest: CosmicQuest): Result<Unit>
+    suspend fun claimDailySupply(todayKey: String): Result<DailySupplyTier>
+    suspend fun claimWheelPrize(prize: WheelPrize, todayKey: String, isFreeDaily: Boolean): Result<Unit>
     suspend fun recordSagaLevelResult(
         levelNumber: Int,
         score: Long,
@@ -76,11 +79,20 @@ class FirestoreProgressStore(
     override suspend fun spendCoinsForExtraShots(cost: Long): Result<Unit> =
         repository.spendCoinsForExtraShots(userId, cost)
 
+    override suspend fun grantAdRewardCoins(coins: Long): Result<Unit> =
+        repository.grantAdRewardCoins(userId, coins)
+
     override suspend fun unlockOrEquipSkin(skin: CannonSkin): Result<Unit> =
         repository.unlockOrEquipSkin(userId, skin)
 
     override suspend fun claimQuest(quest: CosmicQuest): Result<Unit> =
         repository.claimQuest(userId, quest)
+
+    override suspend fun claimDailySupply(todayKey: String): Result<DailySupplyTier> =
+        repository.claimDailySupply(userId, todayKey)
+
+    override suspend fun claimWheelPrize(prize: WheelPrize, todayKey: String, isFreeDaily: Boolean): Result<Unit> =
+        repository.claimWheelPrize(userId, prize, todayKey, isFreeDaily)
 
     override suspend fun recordSagaLevelResult(
         levelNumber: Int,
@@ -219,6 +231,13 @@ class GuestProgressStore(context: Context) : GameProgressStore {
         return Result.success(Unit)
     }
 
+    override suspend fun grantAdRewardCoins(coins: Long): Result<Unit> {
+        val current = profileFlow.value ?: loadProfile()
+        val safeCoins = coins.coerceIn(1L, 1000L)
+        saveProfile(current.copy(starCoins = current.starCoins + safeCoins))
+        return Result.success(Unit)
+    }
+
     override suspend fun unlockOrEquipSkin(skin: CannonSkin): Result<Unit> {
         val current = profileFlow.value ?: loadProfile()
         return if (skin.name in current.unlockedSkins) {
@@ -254,6 +273,49 @@ class GuestProgressStore(context: Context) : GameProgressStore {
             BoosterType.BOMB -> updated.copy(bombBoosters = updated.bombBoosters + 1L)
             BoosterType.PRISM -> updated.copy(prismBoosters = updated.prismBoosters + 1L)
             BoosterType.LASER -> updated.copy(laserBoosters = updated.laserBoosters + 1L)
+            null -> updated
+        }
+        saveProfile(updated)
+        return Result.success(Unit)
+    }
+
+    override suspend fun claimDailySupply(todayKey: String): Result<DailySupplyTier> {
+        val current = profileFlow.value ?: loadProfile()
+        if (current.lastLoginRewardDate == todayKey) {
+            return Result.failure(IllegalStateException("Today's Star Supply already claimed!"))
+        }
+        val nextDay = DailySupplyCatalog.nextClaimDay(current.loginRewardDay)
+        val tier = DailySupplyCatalog.tierForDay(nextDay)
+        saveProfile(
+            current.copy(
+                starCoins = current.starCoins + tier.coins,
+                bombBoosters = (current.bombBoosters + tier.bombs).coerceAtMost(999L),
+                prismBoosters = (current.prismBoosters + tier.prisms).coerceAtMost(999L),
+                laserBoosters = (current.laserBoosters + tier.lasers).coerceAtMost(999L),
+                loginRewardDay = nextDay.toLong(),
+                lastLoginRewardDate = todayKey
+            )
+        )
+        return Result.success(tier)
+    }
+
+    override suspend fun claimWheelPrize(
+        prize: WheelPrize,
+        todayKey: String,
+        isFreeDaily: Boolean
+    ): Result<Unit> {
+        val current = profileFlow.value ?: loadProfile()
+        if (isFreeDaily && current.lastWheelSpinDate == todayKey) {
+            return Result.failure(IllegalStateException("Daily free spin already used today!"))
+        }
+        var updated = current.copy(
+            starCoins = current.starCoins + prize.coins,
+            lastWheelSpinDate = if (isFreeDaily) todayKey else current.lastWheelSpinDate
+        )
+        updated = when (prize.booster) {
+            BoosterType.BOMB -> updated.copy(bombBoosters = (updated.bombBoosters + 1L).coerceAtMost(999L))
+            BoosterType.PRISM -> updated.copy(prismBoosters = (updated.prismBoosters + 1L).coerceAtMost(999L))
+            BoosterType.LASER -> updated.copy(laserBoosters = (updated.laserBoosters + 1L).coerceAtMost(999L))
             null -> updated
         }
         saveProfile(updated)
@@ -418,7 +480,10 @@ class GuestProgressStore(context: Context) : GameProgressStore {
                 prefs.getString(KEY_UNLOCKED_SKINS, null),
                 listOf(CannonSkin.CYAN_INTERCEPTOR.name)
             ),
-            claimedQuests = decodeStringList(prefs.getString(KEY_CLAIMED_QUESTS, null), emptyList())
+            claimedQuests = decodeStringList(prefs.getString(KEY_CLAIMED_QUESTS, null), emptyList()),
+            loginRewardDay = prefs.getLong(KEY_LOGIN_REWARD_DAY, 0L).coerceIn(0L, 7L),
+            lastLoginRewardDate = prefs.getString(KEY_LAST_LOGIN_REWARD, "") ?: "",
+            lastWheelSpinDate = prefs.getString(KEY_LAST_WHEEL_SPIN, "") ?: ""
         )
     }
 
@@ -441,6 +506,9 @@ class GuestProgressStore(context: Context) : GameProgressStore {
             .putString(KEY_EQUIPPED_SKIN, profile.equippedSkin)
             .putString(KEY_UNLOCKED_SKINS, JSONArray(profile.unlockedSkins).toString())
             .putString(KEY_CLAIMED_QUESTS, JSONArray(profile.claimedQuests).toString())
+            .putLong(KEY_LOGIN_REWARD_DAY, profile.loginRewardDay)
+            .putString(KEY_LAST_LOGIN_REWARD, profile.lastLoginRewardDate)
+            .putString(KEY_LAST_WHEEL_SPIN, profile.lastWheelSpinDate)
             .apply()
         profileFlow.value = profile
     }
@@ -565,6 +633,9 @@ class GuestProgressStore(context: Context) : GameProgressStore {
         const val KEY_EQUIPPED_SKIN = "equipped_skin"
         const val KEY_UNLOCKED_SKINS = "unlocked_skins"
         const val KEY_CLAIMED_QUESTS = "claimed_quests"
+        const val KEY_LOGIN_REWARD_DAY = "login_reward_day"
+        const val KEY_LAST_LOGIN_REWARD = "last_login_reward"
+        const val KEY_LAST_WHEEL_SPIN = "last_wheel_spin"
         const val KEY_LEVELS_JSON = "levels_json"
         const val KEY_RUNS_JSON = "runs_json"
     }

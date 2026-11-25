@@ -11,6 +11,7 @@ import com.example.data.GameRun
 import com.example.data.LevelProgress
 import com.example.data.PlayerProfile
 import com.example.data.UiState
+import com.example.data.WheelPrize
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -125,6 +126,42 @@ class ProfileViewModel(
                 result.exceptionOrNull()?.localizedMessage ?: "Quest not ready to claim"
             }
         }
+    }
+
+    fun grantAdRewardCoins(coins: Long = 75L) {
+        viewModelScope.launch {
+            val result = store.grantAdRewardCoins(coins)
+            _shopFeedback.value = if (result.isSuccess) {
+                "Reward Earned: +$coins Star Coins!"
+            } else {
+                result.exceptionOrNull()?.localizedMessage ?: "Failed to credit ad reward"
+            }
+        }
+    }
+
+    fun claimDailySupply(todayKey: String) {
+        viewModelScope.launch {
+            val result = store.claimDailySupply(todayKey)
+            _shopFeedback.value = result.fold(
+                onSuccess = { tier -> "Claimed Day ${tier.day}: ${tier.title}!" },
+                onFailure = { it.localizedMessage ?: "Daily Supply already claimed today" }
+            )
+        }
+    }
+
+    fun claimWheelPrize(prize: WheelPrize, todayKey: String, isFreeDaily: Boolean) {
+        viewModelScope.launch {
+            val result = store.claimWheelPrize(prize, todayKey, isFreeDaily)
+            _shopFeedback.value = if (result.isSuccess) {
+                "Lucky Wheel: Won ${prize.fullLabel}!"
+            } else {
+                result.exceptionOrNull()?.localizedMessage ?: "Unable to claim wheel prize"
+            }
+        }
+    }
+
+    fun reportAdFeedback(message: String) {
+        _shopFeedback.value = message
     }
 
     fun clearShopFeedback() {

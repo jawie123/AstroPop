@@ -57,6 +57,9 @@ function validProfilePayload(uid, now = new Date(Date.now() - 2000)) {
     equippedSkin: "CYAN_INTERCEPTOR",
     unlockedSkins: ["CYAN_INTERCEPTOR"],
     claimedQuests: [],
+    loginRewardDay: 0,
+    lastLoginRewardDate: "",
+    lastWheelSpinDate: "",
     createdAt: now,
     updatedAt: now,
   };
@@ -90,6 +93,9 @@ test("Authenticated owner: valid profile create, Star Coins, Skin & Quest update
       equippedSkin: "SOLAR_VALKYRIE",
       unlockedSkins: ["CYAN_INTERCEPTOR", "SOLAR_VALKYRIE"],
       claimedQuests: ["quest_pop_50"],
+      loginRewardDay: 1,
+      lastLoginRewardDate: "2026-11-25",
+      lastWheelSpinDate: "2026-11-25",
       updatedAt: new Date(Date.now() - 1000),
     })
   );

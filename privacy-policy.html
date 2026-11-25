@@ -82,23 +82,27 @@
       <li>Remember your audio and tactile feedback preferences.</li>
     </ul>
 
-    <h2>3. Data Sharing &amp; Third-Party Service Providers</h2>
+    <h2>3. Advertising, Data Sharing &amp; Third-Party Providers</h2>
     <p>
-      AstroPop does <strong>not</strong> sell, rent, or trade your personal data. AstroPop contains
-      <strong>no third-party advertising networks</strong> and <strong>no cross-app tracking SDKs</strong>.
-      When you use optional Google Sign-In and cloud sync, data is processed solely by:
+      AstroPop does <strong>not</strong> sell, rent, or trade your personal data. AstroPop displays
+      Banner, Interstitial, and optional Rewarded Ads powered by <strong>Google AdMob</strong>
+      (Google Mobile Ads SDK). Google AdMob may collect or process device identifiers (such as the
+      Android Advertising ID), IP address, and ad interaction diagnostics to deliver and measure ads
+      in accordance with Google's Privacy Policy.
     </p>
     <ul>
-      <li><strong>Google Firebase Authentication</strong> (session authentication)</li>
+      <li><strong>Google AdMob</strong> (in-app advertising and rewarded video delivery)</li>
+      <li><strong>Google Firebase Authentication</strong> (optional session authentication)</li>
       <li><strong>Google Cloud Firestore</strong> (encrypted cloud database storage for game progress)</li>
-      <li><strong>Google Identity / Credential Manager</strong> (Google Sign-In authentication)</li>
+      <li><strong>Google Identity / Credential Manager</strong> (optional Google Sign-In)</li>
     </ul>
 
-    <h2>4. Device Permissions</h2>
+    <h2>4. Device Permissions &amp; Ad Controls</h2>
     <p>
-      AstroPop requests only standard <code>INTERNET</code> permission to enable optional Google
-      Sign-In and cloud save synchronization. It does not access location, camera, microphone,
-      contacts, or external media storage.
+      AstroPop requests only standard <code>INTERNET</code> permission (and advertising ID permission
+      bundled with Google Mobile Ads) to serve ads and optional cloud sync. It does not access
+      location, camera, microphone, contacts, or external media storage. You can reset or opt out of
+      personalized ads anytime via <strong>Android Settings &rarr; Privacy &rarr; Ads</strong>.
     </p>
 
     <h2>5. Data Retention &amp; Deletion Requests</h2>

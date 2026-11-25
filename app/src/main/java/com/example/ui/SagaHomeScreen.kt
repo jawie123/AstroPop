@@ -1,5 +1,9 @@
 package com.example.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,11 +33,14 @@ import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CalendarToday
+import androidx.compose.material.icons.rounded.CardGiftcard
+import androidx.compose.material.icons.rounded.Casino
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.RocketLaunch
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shield
@@ -41,6 +48,7 @@ import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Storefront
 import androidx.compose.material.icons.rounded.Toll
 import androidx.compose.material.icons.rounded.Whatshot
+import androidx.compose.material.icons.rounded.WorkspacePremium
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -52,29 +60,47 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.ads.AstroBannerAd
 import com.example.data.BoosterType
 import com.example.data.CannonSkin
 import com.example.data.CosmicQuest
+import com.example.data.DailySupplyCatalog
+import com.example.data.DailySupplyTier
 import com.example.data.LevelProgress
+import com.example.data.PilotRankInfo
 import com.example.data.PlayerProfile
+import com.example.data.WheelPrize
+import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import com.example.game.LevelCatalog
 import com.example.game.LevelGoal
 import com.example.game.SagaLevelSpec
@@ -98,12 +124,17 @@ fun SagaHomeScreen(
     isGuest: Boolean,
     errorMessage: String?,
     shopFeedback: String?,
+    isRewardedAdReady: Boolean,
     onPlaySagaLevel: (Int) -> Unit,
     onPlayDaily: () -> Unit,
     onPlayEndless: () -> Unit,
     onPurchaseBooster: (BoosterType) -> Unit,
     onUnlockOrEquipSkin: (CannonSkin) -> Unit,
     onClaimQuest: (CosmicQuest) -> Unit,
+    onClaimDailySupply: (String) -> Unit,
+    onClaimWheelPrize: (WheelPrize, String, Boolean) -> Unit,
+    onWatchAdForCoins: () -> Unit,
+    onWatchAdForSpin: (() -> Unit) -> Unit,
     onClearShopFeedback: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
@@ -111,9 +142,14 @@ fun SagaHomeScreen(
     val levelMap = levels.associateBy { it.levelNumber.toInt() }
     val todayKey = remember { LevelCatalog.todayKey() }
     val dailyCompletedToday = profile?.lastDailyDay == todayKey
+    val supplyAvailableToday = profile?.lastLoginRewardDate != todayKey
+    val freeSpinAvailableToday = profile?.lastWheelSpinDate != todayKey
+    val pilotRank = remember(profile) { (profile ?: PlayerProfile()).pilotRank() }
     var showArmoryDialog by remember { mutableStateOf(false) }
     var showQuestsDialog by remember { mutableStateOf(false) }
     var showCodexDialog by remember { mutableStateOf(false) }
+    var showDailySupplyDialog by remember { mutableStateOf(false) }
+    var showLuckyWheelDialog by remember { mutableStateOf(false) }
     val claimableQuestCount = remember(profile) {
         if (profile == null) 0
         else CosmicQuest.entries.count { it.isCompleted(profile) && it.id !in profile.claimedQuests }
@@ -311,6 +347,8 @@ fun SagaHomeScreen(
                 }
             }
 
+            PilotRankStrip(rank = pilotRank)
+
             if (errorMessage != null) {
                 Surface(
                     color = MaterialTheme.colorScheme.error.copy(alpha = 0.22f),
@@ -329,10 +367,52 @@ fun SagaHomeScreen(
             }
 
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                // Quick Action Row: 7-Day Daily Supply & Cosmic Lucky Wheel
+                item {
+                    val nextSupplyDay = DailySupplyCatalog.nextClaimDay(profile?.loginRewardDay ?: 0L)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        QuickPerkCard(
+                            title = "7-Day Supply",
+                            subtitle = if (supplyAvailableToday) "Day $nextSupplyDay Ready!" else "Claimed Today",
+                            badgeText = if (supplyAvailableToday) "CLAIM!" else "DONE",
+                            accent = if (supplyAvailableToday) AstroEmerald else AstroCyan,
+                            icon = Icons.Rounded.CardGiftcard,
+                            highlighted = supplyAvailableToday,
+                            onClick = {
+                                onClearShopFeedback()
+                                showDailySupplyDialog = true
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("open_daily_supply_button")
+                        )
+                        QuickPerkCard(
+                            title = "Lucky Wheel",
+                            subtitle = if (freeSpinAvailableToday) "Free Daily Spin" else "Bonus Ad Spin",
+                            badgeText = if (freeSpinAvailableToday) "FREE SPIN" else "AD SPIN",
+                            accent = if (freeSpinAvailableToday) AstroGold else AstroMagenta,
+                            icon = Icons.Rounded.Casino,
+                            highlighted = freeSpinAvailableToday,
+                            onClick = {
+                                onClearShopFeedback()
+                                showLuckyWheelDialog = true
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("open_lucky_wheel_button")
+                        )
+                    }
+                }
+
                 // Daily Cosmic Challenge Card
                 item {
                     Card(
@@ -570,14 +650,18 @@ fun SagaHomeScreen(
 
                 item { Spacer(modifier = Modifier.height(16.dp)) }
             }
+
+            AstroBannerAd(modifier = Modifier.padding(top = 4.dp, bottom = 4.dp))
         }
 
         if (showArmoryDialog) {
             CosmicArmoryDialog(
                 profile = profile,
                 feedback = shopFeedback,
+                isRewardedAdReady = isRewardedAdReady,
                 onPurchaseBooster = onPurchaseBooster,
                 onUnlockOrEquipSkin = onUnlockOrEquipSkin,
+                onWatchAdForCoins = onWatchAdForCoins,
                 onDismiss = {
                     onClearShopFeedback()
                     showArmoryDialog = false
@@ -600,7 +684,619 @@ fun SagaHomeScreen(
         if (showCodexDialog) {
             CosmicCodexDialog(onDismiss = { showCodexDialog = false })
         }
+
+        if (showDailySupplyDialog) {
+            DailySupplyDialog(
+                profile = profile,
+                todayKey = todayKey,
+                feedback = shopFeedback,
+                onClaim = { onClaimDailySupply(todayKey) },
+                onDismiss = {
+                    onClearShopFeedback()
+                    showDailySupplyDialog = false
+                }
+            )
+        }
+
+        if (showLuckyWheelDialog) {
+            LuckyWheelDialog(
+                freeSpinAvailable = freeSpinAvailableToday,
+                isRewardedAdReady = isRewardedAdReady,
+                feedback = shopFeedback,
+                onWatchAdForSpin = onWatchAdForSpin,
+                onPrizeWon = { prize, isFree ->
+                    onClaimWheelPrize(prize, todayKey, isFree)
+                },
+                onDismiss = {
+                    onClearShopFeedback()
+                    showLuckyWheelDialog = false
+                }
+            )
+        }
     }
+}
+
+@Composable
+private fun PilotRankStrip(rank: PilotRankInfo) {
+    Surface(
+        color = NebulaSurface.copy(alpha = 0.86f),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 2.dp)
+            .border(1.dp, AstroCyan.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.WorkspacePremium,
+                        contentDescription = "Pilot Rank",
+                        tint = AstroGold,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "Rank ${rank.rankNumber} • ${rank.title}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = StarlightWhite
+                    )
+                }
+                Text(
+                    text = if (rank.nextRankXp != null) "${rank.xp} / ${rank.nextRankXp} XP" else "${rank.xp} XP • MAX",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AstroCyan
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(StardustOutline.copy(alpha = 0.35f))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(rank.progress.coerceIn(0.04f, 1f))
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Brush.horizontalGradient(listOf(AstroCyan, AstroGold)))
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickPerkCard(
+    title: String,
+    subtitle: String,
+    badgeText: String,
+    accent: Color,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    highlighted: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = NebulaSurface.copy(alpha = 0.92f),
+        shape = RoundedCornerShape(18.dp),
+        modifier = modifier
+            .minimumInteractiveComponentSize()
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .border(
+                width = if (highlighted) 1.5.dp else 1.dp,
+                color = if (highlighted) accent else StardustOutline.copy(alpha = 0.55f),
+                shape = RoundedCornerShape(18.dp)
+            )
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(accent.copy(alpha = 0.2f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(22.dp))
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Surface(
+                    color = accent.copy(alpha = 0.2f),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        text = badgeText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = accent,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                    )
+                }
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = StarlightWhite,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = StarlightMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DailySupplyDialog(
+    profile: PlayerProfile?,
+    todayKey: String,
+    feedback: String?,
+    onClaim: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val canClaimToday = profile?.lastLoginRewardDate != todayKey
+    val rawDay = (profile?.loginRewardDay ?: 0L).toInt().coerceIn(0, 7)
+    val claimedCount = if (canClaimToday) rawDay % 7 else rawDay
+    val nextDay = DailySupplyCatalog.nextClaimDay(rawDay.toLong())
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = NebulaSurface,
+        titleContentColor = StarlightWhite,
+        textContentColor = StarlightWhite,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Rounded.CardGiftcard, contentDescription = null, tint = AstroEmerald)
+                Text("7-Day Star Supply", style = MaterialTheme.typography.headlineMedium)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (feedback != null) {
+                    Surface(
+                        color = AstroEmerald.copy(alpha = 0.18f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = feedback,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = AstroEmerald,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
+                val firstSix = DailySupplyCatalog.tiers.take(6).chunked(3)
+                firstSix.forEach { rowTiers ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        rowTiers.forEach { tier ->
+                            val isClaimed = tier.day <= claimedCount
+                            val isNext = canClaimToday && tier.day == nextDay
+                            SupplyTierTile(
+                                tier = tier,
+                                isClaimed = isClaimed,
+                                isNext = isNext,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+                val daySeven = DailySupplyCatalog.tiers.last()
+                val daySevenClaimed = daySeven.day <= claimedCount
+                val daySevenNext = canClaimToday && daySeven.day == nextDay
+                Surface(
+                    color = if (daySevenNext) AstroGold.copy(alpha = 0.22f) else NebulaElevated,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(
+                            width = if (daySevenNext) 2.dp else 1.dp,
+                            color = if (daySevenNext) AstroGold else if (daySevenClaimed) AstroEmerald else AstroGold.copy(alpha = 0.4f),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "DAY 7 • JACKPOT SUPPLY",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AstroGold
+                            )
+                            Text(
+                                text = "+250 Coins & All 3 Boosters!",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = StarlightWhite
+                            )
+                        }
+                        if (daySevenClaimed) {
+                            Icon(Icons.Rounded.CheckCircle, contentDescription = "Claimed", tint = AstroEmerald)
+                        } else {
+                            Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = AstroGold)
+                        }
+                    }
+                }
+
+                Button(
+                    onClick = onClaim,
+                    enabled = canClaimToday,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AstroEmerald,
+                        contentColor = CosmicAbyss
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("claim_daily_supply_button")
+                ) {
+                    Text(
+                        text = if (canClaimToday) "Claim Day $nextDay Supply" else "Come Back Tomorrow!",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.height(48.dp).testTag("close_daily_supply_button")
+            ) {
+                Text("Close", color = AstroCyan)
+            }
+        }
+    )
+}
+
+@Composable
+private fun SupplyTierTile(
+    tier: DailySupplyTier,
+    isClaimed: Boolean,
+    isNext: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = when {
+            isNext -> AstroEmerald.copy(alpha = 0.2f)
+            isClaimed -> NebulaElevated.copy(alpha = 0.65f)
+            else -> NebulaElevated
+        },
+        shape = RoundedCornerShape(14.dp),
+        modifier = modifier.border(
+            width = if (isNext) 2.dp else 1.dp,
+            color = when {
+                isNext -> AstroEmerald
+                isClaimed -> AstroEmerald.copy(alpha = 0.45f)
+                else -> StardustOutline.copy(alpha = 0.45f)
+            },
+            shape = RoundedCornerShape(14.dp)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = "DAY ${tier.day}",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isNext) AstroEmerald else AstroCyan
+            )
+            if (isClaimed) {
+                Icon(
+                    Icons.Rounded.CheckCircle,
+                    contentDescription = "Claimed",
+                    tint = AstroEmerald,
+                    modifier = Modifier.size(20.dp)
+                )
+            } else {
+                Icon(
+                    Icons.Rounded.Toll,
+                    contentDescription = null,
+                    tint = AstroGold,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Text(
+                text = tier.title,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isClaimed) StarlightMuted else StarlightWhite,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun LuckyWheelDialog(
+    freeSpinAvailable: Boolean,
+    isRewardedAdReady: Boolean,
+    feedback: String?,
+    onWatchAdForSpin: (() -> Unit) -> Unit,
+    onPrizeWon: (WheelPrize, Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val prizes = remember { WheelPrize.entries }
+    val sliceColors = remember {
+        listOf(
+            Color(0xFF1E5F74),
+            Color(0xFF7B2CBF),
+            Color(0xFF0E7C66),
+            Color(0xFFB5179E),
+            Color(0xFF2B4C7E),
+            Color(0xFF0A8754),
+            Color(0xFFD97706),
+            Color(0xFF4361EE)
+        )
+    }
+    val rotation = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    var isSpinning by remember { mutableStateOf(false) }
+    var lastWonPrize by remember { mutableStateOf<WheelPrize?>(null) }
+    val textPaint = remember {
+        android.graphics.Paint().apply {
+            color = android.graphics.Color.WHITE
+            textAlign = android.graphics.Paint.Align.RIGHT
+            isFakeBoldText = true
+            isAntiAlias = true
+        }
+    }
+
+    fun startSpin(isFreeDaily: Boolean) {
+        if (isSpinning) return
+        isSpinning = true
+        lastWonPrize = null
+        val targetIndex = prizes.indices.random()
+        val selected = prizes[targetIndex]
+        val baseMod = ((rotation.value % 360f) + 360f) % 360f
+        val targetMod = (360f - targetIndex * 45f) % 360f
+        val delta = ((targetMod - baseMod) + 360f) % 360f
+        val jitter = (-10..10).random().toFloat()
+        val finalTarget = rotation.value + 5f * 360f + delta + jitter
+        scope.launch {
+            rotation.animateTo(
+                targetValue = finalTarget,
+                animationSpec = tween(durationMillis = 3400, easing = FastOutSlowInEasing)
+            )
+            lastWonPrize = selected
+            isSpinning = false
+            onPrizeWon(selected, isFreeDaily)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!isSpinning) onDismiss() },
+        containerColor = NebulaSurface,
+        titleContentColor = StarlightWhite,
+        textContentColor = StarlightWhite,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Rounded.Casino, contentDescription = null, tint = AstroGold)
+                Text("Cosmic Lucky Wheel", style = MaterialTheme.typography.headlineMedium)
+            }
+        },
+        text = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    modifier = Modifier.size(230.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val radius = size.minDimension * 0.44f
+                        val center = Offset(size.width / 2f, size.height / 2f + 6.dp.toPx())
+                        val topLeft = Offset(center.x - radius, center.y - radius)
+                        val arcSize = Size(radius * 2f, radius * 2f)
+
+                        drawCircle(
+                            color = AstroGold.copy(alpha = 0.25f),
+                            radius = radius + 8.dp.toPx(),
+                            center = center
+                        )
+
+                        rotate(degrees = rotation.value, pivot = center) {
+                            prizes.forEachIndexed { idx, prize ->
+                                val startAngle = -90f - 22.5f + idx * 45f
+                                drawArc(
+                                    color = sliceColors[idx % sliceColors.size],
+                                    startAngle = startAngle,
+                                    sweepAngle = 45f,
+                                    useCenter = true,
+                                    topLeft = topLeft,
+                                    size = arcSize
+                                )
+                                drawArc(
+                                    color = StarlightWhite.copy(alpha = 0.35f),
+                                    startAngle = startAngle,
+                                    sweepAngle = 45f,
+                                    useCenter = true,
+                                    topLeft = topLeft,
+                                    size = arcSize,
+                                    style = Stroke(width = 1.5.dp.toPx())
+                                )
+                                val midAngle = -90f + idx * 45f
+                                val rad = midAngle * PI.toFloat() / 180f
+                                textPaint.textSize = 12.dp.toPx()
+                                val canvas = drawContext.canvas.nativeCanvas
+                                canvas.save()
+                                canvas.translate(center.x, center.y)
+                                canvas.rotate(midAngle)
+                                canvas.drawText(
+                                    prize.shortLabel,
+                                    radius * 0.86f,
+                                    4.dp.toPx(),
+                                    textPaint
+                                )
+                                canvas.restore()
+                                // Dot peg at slice boundary
+                                val pegRad = (startAngle) * PI.toFloat() / 180f
+                                drawCircle(
+                                    color = AstroGold,
+                                    radius = 3.dp.toPx(),
+                                    center = Offset(
+                                        center.x + cos(pegRad) * (radius - 2.dp.toPx()),
+                                        center.y + sin(pegRad) * (radius - 2.dp.toPx())
+                                    )
+                                )
+                                // Keep rad referenced cleanly
+                                if (rad.isNaN()) return@forEachIndexed
+                            }
+                        }
+
+                        // Outer golden rim
+                        drawCircle(
+                            color = AstroGold,
+                            radius = radius,
+                            center = center,
+                            style = Stroke(width = 4.dp.toPx())
+                        )
+
+                        // Center hub
+                        drawCircle(
+                            color = CosmicAbyss,
+                            radius = 22.dp.toPx(),
+                            center = center
+                        )
+                        drawCircle(
+                            color = AstroCyan,
+                            radius = 22.dp.toPx(),
+                            center = center,
+                            style = Stroke(width = 3.dp.toPx())
+                        )
+
+                        // Top pointer triangle
+                        val pointerTipY = center.y - radius + 8.dp.toPx()
+                        val pointerTopY = center.y - radius - 14.dp.toPx()
+                        val path = Path().apply {
+                            moveTo(center.x, pointerTipY)
+                            lineTo(center.x - 11.dp.toPx(), pointerTopY)
+                            lineTo(center.x + 11.dp.toPx(), pointerTopY)
+                            close()
+                        }
+                        drawPath(path = path, color = AstroGold)
+                    }
+                }
+
+                val banner = lastWonPrize?.let { "You Won: ${it.fullLabel}" } ?: feedback
+                if (banner != null) {
+                    Surface(
+                        color = AstroGold.copy(alpha = 0.18f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, AstroGold.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                    ) {
+                        Text(
+                            text = banner,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = AstroGold,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
+
+                if (freeSpinAvailable) {
+                    Button(
+                        onClick = { startSpin(isFreeDaily = true) },
+                        enabled = !isSpinning,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AstroGold,
+                            contentColor = CosmicAbyss
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("spin_wheel_free_button")
+                    ) {
+                        Icon(Icons.Rounded.AutoAwesome, contentDescription = null)
+                        Spacer(modifier = Modifier.size(6.dp))
+                        Text(
+                            text = if (isSpinning) "Spinning..." else "Spin Free Daily Wheel!",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            onWatchAdForSpin {
+                                startSpin(isFreeDaily = false)
+                            }
+                        },
+                        enabled = isRewardedAdReady && !isSpinning,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AstroMagenta,
+                            contentColor = StarlightWhite
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("spin_wheel_ad_button")
+                    ) {
+                        Icon(Icons.Rounded.PlayCircle, contentDescription = null)
+                        Spacer(modifier = Modifier.size(6.dp))
+                        Text(
+                            text = when {
+                                isSpinning -> "Spinning..."
+                                isRewardedAdReady -> "Watch Ad for Bonus Spin!"
+                                else -> "Loading Ad..."
+                            },
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (!isSpinning) onDismiss() },
+                enabled = !isSpinning,
+                modifier = Modifier.height(48.dp).testTag("close_lucky_wheel_button")
+            ) {
+                Text("Close", color = AstroCyan)
+            }
+        }
+    )
 }
 
 @Composable
@@ -637,8 +1333,10 @@ private fun ChapterBanner(chapter: String) {
 private fun CosmicArmoryDialog(
     profile: PlayerProfile?,
     feedback: String?,
+    isRewardedAdReady: Boolean,
     onPurchaseBooster: (BoosterType) -> Unit,
     onUnlockOrEquipSkin: (CannonSkin) -> Unit,
+    onWatchAdForCoins: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val coins = profile?.starCoins ?: 0L
@@ -666,6 +1364,52 @@ private fun CosmicArmoryDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                Surface(
+                    color = AstroGold.copy(alpha = 0.14f),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, AstroGold.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Free +75 Star Coins",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = AstroGold
+                            )
+                            Text(
+                                text = if (isRewardedAdReady) "Watch a short video ad" else "Loading rewarded ad...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = StarlightMuted
+                            )
+                        }
+                        Spacer(modifier = Modifier.size(8.dp))
+                        Button(
+                            onClick = onWatchAdForCoins,
+                            enabled = isRewardedAdReady,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AstroGold,
+                                contentColor = CosmicAbyss
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("watch_ad_coins_button")
+                        ) {
+                            Icon(Icons.Rounded.PlayCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.size(4.dp))
+                            Text(if (isRewardedAdReady) "+75c" else "Wait", style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)

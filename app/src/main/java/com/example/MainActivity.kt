@@ -25,6 +25,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.example.ads.AstroAdsManager
+import com.example.ads.findActivity
 import com.example.audio.SoundSynth
 import com.example.auth.AuthScreen
 import com.example.auth.onGoogleSignInClicked
@@ -120,9 +122,12 @@ private fun AstroPopPlayFlow(
     onExitGuest: () -> Unit
 ) {
     val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
     val soundSynth = remember { SoundSynth() }
+    val adsManager = remember(context) { AstroAdsManager(context).apply { initialize() } }
+    val isRewardedAdReady by adsManager.isRewardedReady.collectAsStateWithLifecycle()
 
     val progressStore = remember(sessionKey, isGuest) {
         if (isGuest) {
@@ -186,6 +191,7 @@ private fun AstroPopPlayFlow(
             isGuest = isGuest,
             errorMessage = errorMsg,
             shopFeedback = shopFeedback,
+            isRewardedAdReady = isRewardedAdReady,
             onPlaySagaLevel = { levelNum ->
                 activeLevel = levelNum
                 activeMode = GameMode.SAGA
@@ -202,6 +208,22 @@ private fun AstroPopPlayFlow(
             onPurchaseBooster = profileViewModel::purchaseBooster,
             onUnlockOrEquipSkin = profileViewModel::unlockOrEquipSkin,
             onClaimQuest = profileViewModel::claimQuest,
+            onClaimDailySupply = profileViewModel::claimDailySupply,
+            onClaimWheelPrize = profileViewModel::claimWheelPrize,
+            onWatchAdForCoins = {
+                adsManager.showRewarded(
+                    activity = activity,
+                    onRewardEarned = { profileViewModel.grantAdRewardCoins(75L) },
+                    onUnavailable = { profileViewModel.reportAdFeedback("Ad still loading, please try again shortly.") }
+                )
+            },
+            onWatchAdForSpin = { onSpinUnlocked ->
+                adsManager.showRewarded(
+                    activity = activity,
+                    onRewardEarned = onSpinUnlocked,
+                    onUnavailable = { profileViewModel.reportAdFeedback("Ad still loading, please try again shortly.") }
+                )
+            },
             onClearShopFeedback = profileViewModel::clearShopFeedback,
             onOpenSettings = {
                 guestAuthError = null
@@ -211,16 +233,32 @@ private fun AstroPopPlayFlow(
     } else {
         GameScreen(
             viewModel = gameViewModel,
-            onExitToMap = { activeMode = null },
+            isRewardedAdReady = isRewardedAdReady,
+            onWatchAdSecondChance = {
+                adsManager.showRewarded(
+                    activity = activity,
+                    onRewardEarned = { gameViewModel.grantSecondChanceFromAd() },
+                    onUnavailable = {}
+                )
+            },
+            onExitToMap = {
+                adsManager.maybeShowInterstitial(activity) {
+                    activeMode = null
+                }
+            },
             onNextLevel = { nextNum ->
-                activeLevel = nextNum
-                gameViewModel.startSagaLevel(nextNum, profile)
+                adsManager.maybeShowInterstitial(activity) {
+                    activeLevel = nextNum
+                    gameViewModel.startSagaLevel(nextNum, profile)
+                }
             },
             onRetry = {
-                when (activeMode) {
-                    GameMode.SAGA -> gameViewModel.startSagaLevel(activeLevel, profile)
-                    GameMode.DAILY -> gameViewModel.startDailyChallenge(profile)
-                    GameMode.ENDLESS, null -> gameViewModel.startEndlessMode(profile)
+                adsManager.maybeShowInterstitial(activity) {
+                    when (activeMode) {
+                        GameMode.SAGA -> gameViewModel.startSagaLevel(activeLevel, profile)
+                        GameMode.DAILY -> gameViewModel.startDailyChallenge(profile)
+                        GameMode.ENDLESS, null -> gameViewModel.startEndlessMode(profile)
+                    }
                 }
             }
         )

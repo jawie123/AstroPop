@@ -41,6 +41,7 @@ import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Flare
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Star
@@ -127,6 +128,8 @@ import kotlin.random.Random
 @Composable
 fun GameScreen(
     viewModel: GameViewModel,
+    isRewardedAdReady: Boolean,
+    onWatchAdSecondChance: () -> Unit,
     onExitToMap: () -> Unit,
     onNextLevel: (Int) -> Unit,
     onRetry: () -> Unit
@@ -344,8 +347,10 @@ fun GameScreen(
         if (state.status != GameStatus.PLAYING) {
             GameOverlayModal(
                 state = state,
+                isRewardedAdReady = isRewardedAdReady,
                 onResume = viewModel::togglePause,
                 onSecondChance = viewModel::buySecondChanceExtraShots,
+                onWatchAdSecondChance = onWatchAdSecondChance,
                 onRetry = {
                     if (state.status == GameStatus.LOST) {
                         viewModel.finalizeDefeatWithoutSecondChance()
@@ -966,13 +971,17 @@ private fun BottomBoosterDock(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Surface(
-            color = NebulaElevated,
+            color = if (state.swapHintPulse) AstroGold.copy(alpha = 0.18f) else NebulaElevated,
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier
                 .height(52.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .clickable(onClick = onSwap)
-                .border(1.dp, StardustOutline, RoundedCornerShape(16.dp))
+                .border(
+                    width = if (state.swapHintPulse) 2.dp else 1.dp,
+                    color = if (state.swapHintPulse) AstroGold else StardustOutline,
+                    shape = RoundedCornerShape(16.dp)
+                )
                 .testTag("swap_bubble_button")
         ) {
             Row(
@@ -980,8 +989,16 @@ private fun BottomBoosterDock(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Icon(Icons.Rounded.SwapHoriz, contentDescription = "Swap bubbles", tint = AstroCyan)
-                Text("Swap", style = MaterialTheme.typography.labelLarge, color = StarlightWhite)
+                Icon(
+                    Icons.Rounded.SwapHoriz,
+                    contentDescription = "Swap bubbles",
+                    tint = if (state.swapHintPulse) AstroGold else AstroCyan
+                )
+                Text(
+                    text = if (state.swapHintPulse) "Swap!" else "Swap",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (state.swapHintPulse) AstroGold else StarlightWhite
+                )
             }
         }
 
@@ -1096,8 +1113,10 @@ private fun BoosterButton(
 @Composable
 private fun GameOverlayModal(
     state: GameUiState,
+    isRewardedAdReady: Boolean,
     onResume: () -> Unit,
     onSecondChance: () -> Unit,
+    onWatchAdSecondChance: () -> Unit,
     onRetry: () -> Unit,
     onNextLevel: () -> Unit,
     onExit: () -> Unit
@@ -1241,6 +1260,26 @@ private fun GameOverlayModal(
                             Spacer(modifier = Modifier.size(6.dp))
                             Text(
                                 text = "Continue: +5 Shots (${GameViewModel.SECOND_CHANCE_COST}c)",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                        }
+                    }
+
+                    if (state.status == GameStatus.LOST && state.canWatchAdSecondChance) {
+                        Button(
+                            onClick = onWatchAdSecondChance,
+                            enabled = isRewardedAdReady,
+                            colors = ButtonDefaults.buttonColors(containerColor = AstroEmerald, contentColor = CosmicAbyss),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .testTag("watch_ad_second_chance_button")
+                        ) {
+                            Icon(Icons.Rounded.PlayCircle, contentDescription = null)
+                            Spacer(modifier = Modifier.size(6.dp))
+                            Text(
+                                text = if (isRewardedAdReady) "Watch Ad: Free +5 Shots" else "Loading Free Continue Ad...",
                                 style = MaterialTheme.typography.titleMedium
                             )
                         }

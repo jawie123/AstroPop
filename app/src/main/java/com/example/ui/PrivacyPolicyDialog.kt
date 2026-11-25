@@ -59,18 +59,18 @@ fun PrivacyPolicyDialog(onDismiss: () -> Unit) {
             accent = AstroGold
         ),
         PolicySection(
-            title = "3. How We Use & Share Data",
-            body = "Data is used solely to provide gameplay persistence, cloud sync across sessions, and your " +
-                "in-game preferences. AstroPop contains zero third-party ad networks, zero analytics trackers, " +
-                "and never sells user data. Cloud authentication and sync are handled only by Google Firebase " +
-                "Authentication, Google Cloud Firestore, and Google Credential Manager.",
+            title = "3. Advertising, Data Sharing & Providers",
+            body = "AstroPop displays Banner, Interstitial, and optional Rewarded Ads using Google AdMob " +
+                "(Google Mobile Ads SDK). AdMob may process your device's Advertising ID, IP address, and " +
+                "ad interaction signals to deliver and measure ads. Cloud sync uses Google Firebase " +
+                "Authentication, Google Cloud Firestore, and Google Credential Manager. We never sell personal data.",
             accent = AstroEmerald
         ),
         PolicySection(
-            title = "4. Permissions & Children",
-            body = "AstroPop requests only standard INTERNET access for optional Google Sign-In and cloud sync. " +
-                "AstroPop does not knowingly collect personal information from children under 13 (or the " +
-                "applicable minimum age in your jurisdiction).",
+            title = "4. Permissions, Opt-Out & Children",
+            body = "AstroPop requests only standard network access (INTERNET) for ads and optional cloud sync. " +
+                "You can reset or limit ad personalization anytime in your Android Device Settings → Privacy → Ads. " +
+                "AstroPop does not knowingly collect personal information from children under 13.",
             accent = AstroMagenta
         ),
         PolicySection(
