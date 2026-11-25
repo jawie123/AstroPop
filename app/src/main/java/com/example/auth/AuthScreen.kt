@@ -35,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,6 +62,7 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.example.R
+import com.example.ui.PrivacyPolicyDialog
 import com.example.ui.theme.AstroCyan
 import com.example.ui.theme.AstroGold
 import com.example.ui.theme.AstroMagenta
@@ -194,6 +196,7 @@ fun AuthScreen(
     var isLoading by remember { mutableStateOf(false) }
     var checkingAuto by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var showPrivacyPolicy by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         attemptAutoSignIn(
@@ -287,8 +290,8 @@ fun AuthScreen(
                     FeatureRow(
                         icon = Icons.Rounded.AutoAwesome,
                         tint = AstroGold,
-                        title = "12 Starlight Saga Stages",
-                        subtitle = "Bank shots, ice shields, asteroid bridges & x5 score wells"
+                        title = "18 Starlight Saga Stages & Bosses",
+                        subtitle = "Bank shots, portals, black holes, boss shields & x5 wells"
                     )
                     FeatureRow(
                         icon = Icons.Rounded.Bolt,
@@ -388,7 +391,24 @@ fun AuthScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
                 }
+
+                TextButton(
+                    onClick = { showPrivacyPolicy = true },
+                    modifier = Modifier
+                        .height(48.dp)
+                        .testTag("auth_privacy_policy_button")
+                ) {
+                    Text(
+                        text = "Privacy Policy & Data Safety",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = AstroCyan
+                    )
+                }
             }
+        }
+
+        if (showPrivacyPolicy) {
+            PrivacyPolicyDialog(onDismiss = { showPrivacyPolicy = false })
         }
     }
 }

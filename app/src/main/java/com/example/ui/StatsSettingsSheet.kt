@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Login
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Vibration
 import androidx.compose.material3.Button
@@ -33,6 +34,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,6 +71,8 @@ fun StatsSettingsSheet(
     onSignOut: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    var showPrivacyPolicy by remember { mutableStateOf(false) }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = NebulaSurface,
@@ -299,8 +306,25 @@ fun StatsSettingsSheet(
                     Text("Sign Out", style = MaterialTheme.typography.labelLarge)
                 }
             }
+            OutlinedButton(
+                onClick = { showPrivacyPolicy = true },
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = AstroCyan),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("settings_privacy_policy_button")
+            ) {
+                Icon(Icons.Rounded.Shield, contentDescription = null)
+                Spacer(modifier = Modifier.size(8.dp))
+                Text("Privacy Policy & Data Safety", style = MaterialTheme.typography.labelLarge)
+            }
             Spacer(modifier = Modifier.height(6.dp))
         }
+    }
+
+    if (showPrivacyPolicy) {
+        PrivacyPolicyDialog(onDismiss = { showPrivacyPolicy = false })
     }
 }
 
