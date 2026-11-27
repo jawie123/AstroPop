@@ -10,13 +10,57 @@ enum class GameMode {
     SAGA,
     ENDLESS,
     DAILY,
-    BLITZ
+    BLITZ,
+    BOSS_RUSH
 }
 
 enum class BoosterType(val label: String, val coinCost: Long) {
     BOMB("Nova Bomb", 80L),
     PRISM("Prism Orb", 70L),
     LASER("Star Laser", 110L)
+}
+
+object TacticalPackSpec {
+    const val TITLE = "Tactical Mega Pack"
+    const val SUBTITLE = "+1 Bomb, +1 Prism & +1 Laser (Save 50c!)"
+    const val COIN_COST = 210L
+}
+
+enum class PilotBadge(
+    val title: String,
+    val subtitle: String,
+    val requirement: String
+) {
+    FIRST_LAUNCH("First Launch", "Ignited the plasma railgun", "Pop 25+ bubbles"),
+    STAR_COLLECTOR("Star Collector", "Mastered constellation rescues", "Earn 15+ Saga stars"),
+    VOID_CONQUEROR("Void Conqueror", "Cleared the Singularity sector", "Unlock Stage 19"),
+    SUPERNOVA_CHAMP("Supernova Champion", "Conquered the Supernova Core", "Reach Stage 30 & 50+ Stars"),
+    BLITZ_SPEEDSTER("Blitz Ace", "Master of the 2-minute storm", "Score 5,000+ in Cosmic Blitz"),
+    ENDLESS_TITAN("Endless Titan", "Survived deep nebula waves", "Score 8,000+ in Endless Panic"),
+    VAULT_RAIDER("Vault Raider", "Looter of galactic supply vaults", "Open 5+ Mystery Chests"),
+    ARSENAL_MASTER("Arsenal Master", "Commander of elite hulls", "Unlock 3+ Cannon Skins");
+
+    fun isUnlocked(profile: PlayerProfile): Boolean = when (this) {
+        FIRST_LAUNCH -> profile.totalBubblesPopped >= 25L
+        STAR_COLLECTOR -> profile.totalStars >= 15L
+        VOID_CONQUEROR -> profile.highestUnlockedLevel >= 19L
+        SUPERNOVA_CHAMP -> profile.highestUnlockedLevel >= 30L && profile.totalStars >= 50L
+        BLITZ_SPEEDSTER -> profile.blitzHighScore >= 5000L
+        ENDLESS_TITAN -> profile.endlessHighScore >= 8000L
+        VAULT_RAIDER -> profile.mysteryChestsOpened >= 5L
+        ARSENAL_MASTER -> profile.unlockedSkins.size >= 3
+    }
+
+    fun progressLabel(profile: PlayerProfile): String = when (this) {
+        FIRST_LAUNCH -> "${profile.totalBubblesPopped.coerceAtMost(25L)} / 25 popped"
+        STAR_COLLECTOR -> "${profile.totalStars.coerceAtMost(15L)} / 15 stars"
+        VOID_CONQUEROR -> "Stage ${profile.highestUnlockedLevel.coerceAtMost(19L)} / 19"
+        SUPERNOVA_CHAMP -> "Stage ${profile.highestUnlockedLevel.coerceAtMost(30L)}/30 • ${profile.totalStars.coerceAtMost(50L)}/50 ★"
+        BLITZ_SPEEDSTER -> "${profile.blitzHighScore.coerceAtMost(5000L)} / 5,000 Blitz"
+        ENDLESS_TITAN -> "${profile.endlessHighScore.coerceAtMost(8000L)} / 8,000 Endless"
+        VAULT_RAIDER -> "${profile.mysteryChestsOpened.coerceAtMost(5L)} / 5 chests"
+        ARSENAL_MASTER -> "${profile.unlockedSkins.size.coerceAtMost(3)} / 3 skins"
+    }
 }
 
 enum class CannonSkin(

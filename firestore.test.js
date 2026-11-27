@@ -219,6 +219,18 @@ test("LevelProgress & BLITZ/DAILY/ENDLESS GameRun: valid writes succeed; invalid
     })
   );
 
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("runs").doc("boss_rush_1").set({
+      mode: "BOSS_RUSH",
+      levelNumber: 5,
+      score: 18500,
+      maxCombo: 16,
+      bubblesPopped: 210,
+      starsEarned: 3,
+      createdAt: new Date(Date.now() - 1000),
+    })
+  );
+
   await assertFails(
     aliceDb.collection("users").doc(ALICE_UID).collection("runs").doc("bad_mode").set({
       mode: "CHEAT",

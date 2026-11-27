@@ -62,6 +62,7 @@ import com.example.data.BoosterType
 import com.example.data.GameMode
 import com.example.data.LeaderboardEntry
 import com.example.data.MysteryChestReward
+import com.example.data.PilotBadge
 import com.example.data.PlayerProfile
 import com.example.data.SeasonPassCatalog
 import com.example.data.SeasonPassTier
@@ -772,6 +773,143 @@ fun MissionLoadoutDialog(
                 modifier = Modifier.height(48.dp).testTag("close_loadout_button")
             ) {
                 Text("Cancel", color = StarlightMuted)
+            }
+        }
+    )
+}
+
+@Composable
+fun TrophyRoomDialog(
+    profile: PlayerProfile?,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val p = profile ?: PlayerProfile()
+    val unlockedCount = remember(p) { PilotBadge.entries.count { it.isUnlocked(p) } }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = NebulaSurface,
+        titleContentColor = StarlightWhite,
+        textContentColor = StarlightWhite,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Rounded.WorkspacePremium, contentDescription = null, tint = AstroGold)
+                    Text("Trophy Room", style = MaterialTheme.typography.headlineMedium)
+                }
+                Text("$unlockedCount / ${PilotBadge.entries.size}", style = MaterialTheme.typography.labelLarge, color = AstroGold)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Earn prestigious Galactic Trophies across Saga, Blitz, Endless & Armory milestones.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = StarlightMuted
+                )
+
+                PilotBadge.entries.forEach { badge ->
+                    val unlocked = badge.isUnlocked(p)
+                    Surface(
+                        color = if (unlocked) AstroGold.copy(alpha = 0.14f) else NebulaElevated,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(
+                                width = 1.dp,
+                                color = if (unlocked) AstroGold.copy(alpha = 0.65f) else StardustOutline.copy(alpha = 0.3f),
+                                shape = RoundedCornerShape(14.dp)
+                            )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(if (unlocked) AstroGold.copy(alpha = 0.22f) else NebulaSurface),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (unlocked) Icons.Rounded.Star else Icons.Rounded.Lock,
+                                        contentDescription = badge.title,
+                                        tint = if (unlocked) AstroGold else StarlightMuted,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = badge.title,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = if (unlocked) AstroGold else StarlightWhite
+                                    )
+                                    Text(
+                                        text = if (unlocked) badge.subtitle else "${badge.requirement} (${badge.progressLabel(p)})",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = StarlightMuted
+                                    )
+                                }
+                            }
+                            if (unlocked) {
+                                Icon(
+                                    imageVector = Icons.Rounded.CheckCircle,
+                                    contentDescription = "Unlocked",
+                                    tint = AstroEmerald,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        val shareText = "AstroPop Trophies: $unlockedCount/${PilotBadge.entries.size} Galactic Badges unlocked by ${p.displayName}! Play AstroPop: https://play.google.com/store/apps/details?id=com.aistudio.astropop.qvnrtx"
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, "My AstroPop Trophies")
+                            putExtra(Intent.EXTRA_TEXT, shareText)
+                        }
+                        context.startActivity(Intent.createChooser(intent, "Share AstroPop Trophies"))
+                    },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AstroCyan),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("share_trophies_button")
+                ) {
+                    Icon(Icons.Rounded.Share, contentDescription = null)
+                    Spacer(modifier = Modifier.size(6.dp))
+                    Text("Share Trophy Collection", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.height(48.dp).testTag("close_trophies_button")
+            ) {
+                Text("Close", color = AstroCyan)
             }
         }
     )

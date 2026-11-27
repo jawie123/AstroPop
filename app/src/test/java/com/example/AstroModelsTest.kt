@@ -1,11 +1,17 @@
 package com.example
 
+import com.example.data.BoosterType
+import com.example.data.CannonSkin
 import com.example.data.DailySupplyCatalog
+import com.example.data.GameMode
 import com.example.data.MysteryChestReward
+import com.example.data.PilotBadge
 import com.example.data.PlayerProfile
 import com.example.data.SeasonPassCatalog
+import com.example.data.TacticalPackSpec
 import com.example.data.WheelPrize
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -76,5 +82,37 @@ class AstroModelsTest {
             val rolled = MysteryChestReward.rollRandom()
             assertTrue(rolled in MysteryChestReward.entries)
         }
+    }
+
+    @Test
+    fun tacticalPackSpec_savesCoinsOverIndividualBoosters() {
+        val individualSum = BoosterType.BOMB.coinCost + BoosterType.PRISM.coinCost + BoosterType.LASER.coinCost
+        assertEquals(210L, TacticalPackSpec.COIN_COST)
+        assertTrue(TacticalPackSpec.COIN_COST < individualSum)
+    }
+
+    @Test
+    fun pilotBadges_evaluateUnlockAndProgressCorrectly() {
+        assertEquals(8, PilotBadge.entries.size)
+        val starter = PlayerProfile()
+        assertTrue(PilotBadge.entries.none { it.isUnlocked(starter) })
+        assertEquals("0 / 25 popped", PilotBadge.FIRST_LAUNCH.progressLabel(starter))
+
+        val veteran = PlayerProfile(
+            totalBubblesPopped = 120L,
+            totalStars = 55L,
+            highestUnlockedLevel = 30L,
+            blitzHighScore = 6200L,
+            endlessHighScore = 9100L,
+            mysteryChestsOpened = 6L,
+            unlockedSkins = listOf(
+                CannonSkin.CYAN_INTERCEPTOR.name,
+                CannonSkin.SOLAR_VALKYRIE.name,
+                CannonSkin.PLASMA_NOVA.name
+            )
+        )
+        assertTrue(PilotBadge.entries.all { it.isUnlocked(veteran) })
+        assertFalse(PilotBadge.SUPERNOVA_CHAMP.isUnlocked(PlayerProfile(highestUnlockedLevel = 30L, totalStars = 40L)))
+        assertTrue(GameMode.BOSS_RUSH in GameMode.entries)
     }
 }

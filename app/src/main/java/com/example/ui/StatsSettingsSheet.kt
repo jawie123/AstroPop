@@ -206,6 +206,7 @@ fun StatsSettingsSheet(
                         val runTitle = when (runMode) {
                             GameMode.ENDLESS -> "Endless Panic"
                             GameMode.BLITZ -> "Cosmic Blitz"
+                            GameMode.BOSS_RUSH -> "Boss Rush (${run.levelNumber}/5)"
                             GameMode.DAILY -> "Daily Nebula"
                             GameMode.SAGA -> "Saga Stage ${run.levelNumber}"
                         }

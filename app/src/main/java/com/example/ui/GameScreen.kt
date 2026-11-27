@@ -865,6 +865,7 @@ private fun GameHudBar(
                 val stageTitle = when (state.mode) {
                     GameMode.ENDLESS -> "Endless Panic"
                     GameMode.BLITZ -> "Cosmic Blitz"
+                    GameMode.BOSS_RUSH -> "Boss Rush ${state.bossWaveIndex}/${state.bossWaveTotal}"
                     GameMode.DAILY -> "Daily Nebula"
                     GameMode.SAGA -> "Stage ${state.levelSpec.levelNumber}"
                 }
@@ -928,7 +929,7 @@ private fun GameHudBar(
                         )
                     }
                 }
-            } else if (state.mode == GameMode.SAGA || state.mode == GameMode.DAILY) {
+            } else if (state.mode == GameMode.SAGA || state.mode == GameMode.DAILY || state.mode == GameMode.BOSS_RUSH) {
                 Surface(
                     color = if (state.movesRemaining <= 5) DangerCrimson.copy(alpha = 0.25f) else NebulaSurface,
                     shape = RoundedCornerShape(14.dp),
@@ -1182,9 +1183,14 @@ private fun GameOverlayModal(
                         GameStatus.WON -> when (state.mode) {
                             GameMode.DAILY -> "Daily Cleared!"
                             GameMode.BLITZ -> "Blitz Complete!"
+                            GameMode.BOSS_RUSH -> "Gauntlet Cleared!"
                             else -> "Stage Cleared!"
                         }
-                        GameStatus.LOST -> if (state.mode == GameMode.ENDLESS || state.mode == GameMode.BLITZ) "Nebula Overrun!" else "Out of Shots!"
+                        GameStatus.LOST -> when (state.mode) {
+                            GameMode.ENDLESS, GameMode.BLITZ -> "Nebula Overrun!"
+                            GameMode.BOSS_RUSH -> "Bosses Defeated: ${state.bossWaveIndex - 1}/${state.bossWaveTotal}"
+                            else -> "Out of Shots!"
+                        }
                         GameStatus.PLAYING -> ""
                     }
                     Text(
@@ -1240,8 +1246,9 @@ private fun GameOverlayModal(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Icon(Icons.Rounded.Flare, contentDescription = null, tint = AstroGold)
+                                    val boosterPrefix = if (state.mode == GameMode.BOSS_RUSH) "Gauntlet Reward" else "3-Star Bonus"
                                     Text(
-                                        text = "3-Star Bonus: +1 ${state.earnedBooster.label}!",
+                                        text = "$boosterPrefix: +1 ${state.earnedBooster.label}!",
                                         style = MaterialTheme.typography.labelLarge,
                                         color = AstroGold
                                     )
@@ -1382,6 +1389,7 @@ private fun GameOverlayModal(
                                     GameMode.DAILY -> "Daily Nebula"
                                     GameMode.ENDLESS -> "Endless Panic"
                                     GameMode.BLITZ -> "Cosmic Blitz (2:00)"
+                                    GameMode.BOSS_RUSH -> "Boss Rush (${if (state.status == GameStatus.WON) state.bossWaveTotal else state.bossWaveIndex - 1}/5 Bosses)"
                                 }
                                 val shareBody = "I just scored ${state.score} pts (${state.maxCombo}x max combo) in AstroPop — $modeName! Can you beat my cosmic rank? https://play.google.com/store/apps/details?id=com.aistudio.astropop.qvnrtx"
                                 val shareIntent = Intent(Intent.ACTION_SEND).apply {

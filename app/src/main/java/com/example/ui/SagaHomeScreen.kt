@@ -99,10 +99,12 @@ import com.example.data.GameMode
 import com.example.data.LeaderboardEntry
 import com.example.data.LevelProgress
 import com.example.data.MysteryChestReward
+import com.example.data.PilotBadge
 import com.example.data.PilotRankInfo
 import com.example.data.PlayerProfile
 import com.example.data.SeasonPassCatalog
 import com.example.data.SeasonPassTier
+import com.example.data.TacticalPackSpec
 import com.example.data.UiState
 import com.example.data.WheelPrize
 import kotlinx.coroutines.launch
@@ -139,7 +141,9 @@ fun SagaHomeScreen(
     onPlayDaily: (BoosterType?, Boolean) -> Unit,
     onPlayEndless: (BoosterType?, Boolean) -> Unit,
     onPlayBlitz: (BoosterType?, Boolean) -> Unit,
+    onPlayBossRush: (BoosterType?, Boolean) -> Unit,
     onPurchaseBooster: (BoosterType) -> Unit,
+    onPurchaseTacticalPack: () -> Unit,
     onUnlockOrEquipSkin: (CannonSkin) -> Unit,
     onClaimQuest: (CosmicQuest) -> Unit,
     onClaimDailySupply: (String) -> Unit,
@@ -162,6 +166,10 @@ fun SagaHomeScreen(
     val freeSpinAvailableToday = profile?.lastWheelSpinDate != todayKey
     val freeChestAvailableToday = profile?.lastMysteryChestDate != todayKey
     val pilotRank = remember(profile) { (profile ?: PlayerProfile()).pilotRank() }
+    val unlockedBadgeCount = remember(profile) {
+        val current = profile ?: PlayerProfile()
+        PilotBadge.entries.count { it.isUnlocked(current) }
+    }
     var showArmoryDialog by remember { mutableStateOf(false) }
     var showQuestsDialog by remember { mutableStateOf(false) }
     var showCodexDialog by remember { mutableStateOf(false) }
@@ -170,6 +178,7 @@ fun SagaHomeScreen(
     var showLeaderboardDialog by remember { mutableStateOf(false) }
     var showSeasonPassDialog by remember { mutableStateOf(false) }
     var showMysteryChestDialog by remember { mutableStateOf(false) }
+    var showTrophyRoomDialog by remember { mutableStateOf(false) }
     var pendingLaunch by remember { mutableStateOf<PendingMissionLaunch?>(null) }
 
     val claimableQuestCount = remember(profile) {
@@ -211,171 +220,210 @@ fun SagaHomeScreen(
                 .widthIn(max = 640.dp)
                 .align(Alignment.TopCenter)
         ) {
-            // Top Captain Header
-            Row(
+            // Top Captain Header (2 balanced rows so display name & badges never truncate)
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Row(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.img_astro_mascot),
-                        contentDescription = "Captain avatar",
+                    Row(
                         modifier = Modifier
-                            .size(50.dp)
-                            .clip(CircleShape)
-                            .border(2.dp, AstroCyan, CircleShape),
-                        contentScale = ContentScale.Crop
-                    )
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = profile?.displayName ?: "StarCaptain",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = StarlightWhite,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            if (isGuest) {
-                                Surface(
-                                    color = AstroGold.copy(alpha = 0.2f),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Text(
-                                        text = "GUEST",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = AstroGold,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
-                                }
+                            .weight(1f)
+                            .padding(end = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.img_astro_mascot),
+                            contentDescription = "Captain avatar",
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .border(2.dp, AstroCyan, CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                        Text(
+                            text = profile?.displayName ?: "StarCaptain",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = StarlightWhite,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (isGuest) {
+                            Surface(
+                                color = AstroGold.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "GUEST",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AstroGold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
                             }
                         }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        IconButton(
+                            onClick = { showLeaderboardDialog = true },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(NebulaElevated)
+                                .border(1.dp, AstroGold.copy(alpha = 0.6f), CircleShape)
+                                .testTag("header_leaderboard_button")
                         ) {
-                            BadgePill(
-                                icon = Icons.Rounded.Star,
-                                tint = AstroGold,
-                                text = "${profile?.totalStars ?: 0}"
+                            Icon(
+                                imageVector = Icons.Rounded.Leaderboard,
+                                contentDescription = "Global Leaderboard",
+                                tint = AstroGold
                             )
-                            BadgePill(
-                                icon = Icons.Rounded.Toll,
-                                tint = AstroGold,
-                                text = "${profile?.starCoins ?: 150}"
-                            )
-                            BadgePill(
-                                icon = Icons.Rounded.Whatshot,
-                                tint = AstroMagenta,
-                                text = "${profile?.bombBoosters ?: 0}/${profile?.prismBoosters ?: 0}/${profile?.laserBoosters ?: 0}"
+                        }
+                        IconButton(
+                            onClick = onOpenSettings,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(NebulaSurface.copy(alpha = 0.85f))
+                                .testTag("open_settings_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Settings,
+                                contentDescription = "Settings and stats",
+                                tint = StarlightWhite
                             )
                         }
                     }
                 }
 
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Box {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        BadgePill(
+                            icon = Icons.Rounded.Star,
+                            tint = AstroGold,
+                            text = "${profile?.totalStars ?: 0}"
+                        )
+                        BadgePill(
+                            icon = Icons.Rounded.Toll,
+                            tint = AstroGold,
+                            text = "${profile?.starCoins ?: 150}"
+                        )
+                        BadgePill(
+                            icon = Icons.Rounded.Whatshot,
+                            tint = AstroMagenta,
+                            text = "${profile?.bombBoosters ?: 0}/${profile?.prismBoosters ?: 0}/${profile?.laserBoosters ?: 0}"
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box {
+                            IconButton(
+                                onClick = {
+                                    onClearShopFeedback()
+                                    showQuestsDialog = true
+                                },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(NebulaElevated)
+                                    .border(
+                                        1.dp,
+                                        if (claimableQuestCount > 0) AstroEmerald else AstroCyan.copy(alpha = 0.5f),
+                                        CircleShape
+                                    )
+                                    .testTag("open_quests_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.EmojiEvents,
+                                    contentDescription = "Cosmic Quests",
+                                    tint = if (claimableQuestCount > 0) AstroEmerald else AstroCyan
+                                )
+                            }
+                            if (claimableQuestCount > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(18.dp)
+                                        .clip(CircleShape)
+                                        .background(AstroMagenta),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "$claimableQuestCount",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = StarlightWhite
+                                    )
+                                }
+                            }
+                        }
                         IconButton(
                             onClick = {
                                 onClearShopFeedback()
-                                showQuestsDialog = true
+                                showArmoryDialog = true
                             },
                             modifier = Modifier
                                 .size(48.dp)
                                 .clip(CircleShape)
                                 .background(NebulaElevated)
-                                .border(
-                                    1.dp,
-                                    if (claimableQuestCount > 0) AstroEmerald else AstroCyan.copy(alpha = 0.5f),
-                                    CircleShape
-                                )
-                                .testTag("open_quests_button")
+                                .border(1.dp, AstroGold.copy(alpha = 0.6f), CircleShape)
+                                .testTag("open_armory_button")
                         ) {
                             Icon(
-                                imageVector = Icons.Rounded.EmojiEvents,
-                                contentDescription = "Cosmic Quests",
-                                tint = if (claimableQuestCount > 0) AstroEmerald else AstroCyan
+                                imageVector = Icons.Rounded.Storefront,
+                                contentDescription = "Cosmic Armory and Hangar",
+                                tint = AstroGold
                             )
                         }
-                        if (claimableQuestCount > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .size(18.dp)
-                                    .clip(CircleShape)
-                                    .background(AstroMagenta),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "$claimableQuestCount",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = StarlightWhite
-                                )
-                            }
+                        IconButton(
+                            onClick = { showCodexDialog = true },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(NebulaSurface.copy(alpha = 0.85f))
+                                .testTag("open_codex_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.MenuBook,
+                                contentDescription = "Cosmic Codex guide",
+                                tint = AstroCyan
+                            )
                         }
-                    }
-                    IconButton(
-                        onClick = {
-                            onClearShopFeedback()
-                            showArmoryDialog = true
-                        },
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(NebulaElevated)
-                            .border(1.dp, AstroGold.copy(alpha = 0.6f), CircleShape)
-                            .testTag("open_armory_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Storefront,
-                            contentDescription = "Cosmic Armory and Hangar",
-                            tint = AstroGold
-                        )
-                    }
-                    IconButton(
-                        onClick = { showCodexDialog = true },
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(NebulaSurface.copy(alpha = 0.85f))
-                            .testTag("open_codex_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.MenuBook,
-                            contentDescription = "Cosmic Codex guide",
-                            tint = AstroCyan
-                        )
-                    }
-                    IconButton(
-                        onClick = onOpenSettings,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(NebulaSurface.copy(alpha = 0.85f))
-                            .testTag("open_settings_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Settings,
-                            contentDescription = "Settings and stats",
-                            tint = StarlightWhite
-                        )
                     }
                 }
             }
 
-            PilotRankStrip(rank = pilotRank)
+            PilotRankStrip(
+                rank = pilotRank,
+                unlockedBadges = unlockedBadgeCount,
+                totalBadges = PilotBadge.entries.size,
+                onClick = { showTrophyRoomDialog = true }
+            )
 
             if (errorMessage != null) {
                 Surface(
@@ -494,11 +542,16 @@ fun SagaHomeScreen(
                             .testTag("open_leaderboard_button")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
@@ -512,19 +565,24 @@ fun SagaHomeScreen(
                                     Text(
                                         text = "Global rankings for Endless, Cosmic Blitz & Stars",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = StarlightMuted
+                                        color = StarlightMuted,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
                             Surface(
-                                color = AstroGold.copy(alpha = 0.2f),
-                                shape = RoundedCornerShape(10.dp)
+                                color = AstroGold.copy(alpha = 0.22f),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.border(1.dp, AstroGold.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
                             ) {
                                 Text(
-                                    text = "RANKS",
+                                    text = "TOP 30",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = AstroGold,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                                 )
                             }
                         }
@@ -814,6 +872,97 @@ fun SagaHomeScreen(
                     }
                 }
 
+                // Boss Rush Gauntlet Banner
+                item {
+                    Card(
+                        shape = RoundedCornerShape(26.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(
+                                width = 1.5.dp,
+                                brush = Brush.horizontalGradient(listOf(DangerCrimson, AstroGold)),
+                                shape = RoundedCornerShape(26.dp)
+                            )
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(
+                                            Color(0xFF441328),
+                                            Color(0xFF28194B)
+                                        )
+                                    )
+                                )
+                                .padding(20.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Whatshot,
+                                            contentDescription = null,
+                                            tint = DangerCrimson,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = "5-WAVE GAUNTLET • +340c",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = AstroGold
+                                        )
+                                    }
+                                    Text(
+                                        text = "Boss Rush",
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        color = StarlightWhite
+                                    )
+                                    Text(
+                                        text = "Battle all 5 Cosmic Guardians (+12 shots/wave)",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = StarlightMuted
+                                    )
+                                }
+
+                                Button(
+                                    onClick = {
+                                        pendingLaunch = PendingMissionLaunch(
+                                            mode = GameMode.BOSS_RUSH,
+                                            title = "Boss Rush Gauntlet",
+                                            subtitle = "Defeat all 5 Galactic Bosses in a row with +12 bonus shots per wave!"
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = AstroGold,
+                                        contentColor = CosmicAbyss
+                                    ),
+                                    modifier = Modifier
+                                        .height(50.dp)
+                                        .testTag("play_boss_rush_button")
+                                ) {
+                                    Icon(Icons.Rounded.PlayArrow, contentDescription = null)
+                                    Spacer(modifier = Modifier.size(4.dp))
+                                    Text("Rush", style = MaterialTheme.typography.titleMedium)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Section Header for Starlight Saga
                 item {
                     Row(
@@ -892,6 +1041,7 @@ fun SagaHomeScreen(
                 feedback = shopFeedback,
                 isRewardedAdReady = isRewardedAdReady,
                 onPurchaseBooster = onPurchaseBooster,
+                onPurchaseTacticalPack = onPurchaseTacticalPack,
                 onUnlockOrEquipSkin = onUnlockOrEquipSkin,
                 onWatchAdForCoins = onWatchAdForCoins,
                 onDismiss = {
@@ -994,6 +1144,13 @@ fun SagaHomeScreen(
             )
         }
 
+        if (showTrophyRoomDialog) {
+            TrophyRoomDialog(
+                profile = profile,
+                onDismiss = { showTrophyRoomDialog = false }
+            )
+        }
+
         pendingLaunch?.let { launch ->
             fun dispatchLaunch(booster: BoosterType?, adFree: Boolean) {
                 pendingLaunch = null
@@ -1002,6 +1159,7 @@ fun SagaHomeScreen(
                     GameMode.DAILY -> onPlayDaily(booster, adFree)
                     GameMode.ENDLESS -> onPlayEndless(booster, adFree)
                     GameMode.BLITZ -> onPlayBlitz(booster, adFree)
+                    GameMode.BOSS_RUSH -> onPlayBossRush(booster, adFree)
                 }
             }
             MissionLoadoutDialog(
@@ -1021,14 +1179,23 @@ fun SagaHomeScreen(
 }
 
 @Composable
-private fun PilotRankStrip(rank: PilotRankInfo) {
+private fun PilotRankStrip(
+    rank: PilotRankInfo,
+    unlockedBadges: Int,
+    totalBadges: Int,
+    onClick: () -> Unit
+) {
     Surface(
         color = NebulaSurface.copy(alpha = 0.86f),
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 2.dp)
+            .minimumInteractiveComponentSize()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
             .border(1.dp, AstroCyan.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+            .testTag("open_trophy_room_button")
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -1040,26 +1207,52 @@ private fun PilotRankStrip(rank: PilotRankInfo) {
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.WorkspacePremium,
-                        contentDescription = "Pilot Rank",
+                        contentDescription = "Pilot Rank and Trophies",
                         tint = AstroGold,
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
                         text = "Rank ${rank.rankNumber} • ${rank.title}",
                         style = MaterialTheme.typography.labelLarge,
-                        color = StarlightWhite
+                        color = StarlightWhite,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-                Text(
-                    text = if (rank.nextRankXp != null) "${rank.xp} / ${rank.nextRankXp} XP" else "${rank.xp} XP • MAX",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AstroCyan
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(
+                        color = AstroGold.copy(alpha = 0.18f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.border(1.dp, AstroGold.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                    ) {
+                        Text(
+                            text = "Trophies $unlockedBadges/$totalBadges",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AstroGold,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                        )
+                    }
+                    Text(
+                        text = if (rank.nextRankXp != null) "${rank.xp}/${rank.nextRankXp} XP" else "MAX XP",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AstroCyan,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
             }
             Box(
                 modifier = Modifier
@@ -1104,21 +1297,24 @@ private fun QuickPerkCard(
                 shape = RoundedCornerShape(18.dp)
             )
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(accent.copy(alpha = 0.2f)),
-                contentAlignment = Alignment.Center
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(22.dp))
-            }
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(accent.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(19.dp))
+                }
                 Surface(
                     color = accent.copy(alpha = 0.2f),
                     shape = RoundedCornerShape(6.dp)
@@ -1127,9 +1323,13 @@ private fun QuickPerkCard(
                         text = badgeText,
                         style = MaterialTheme.typography.labelSmall,
                         color = accent,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
@@ -1639,6 +1839,7 @@ private fun CosmicArmoryDialog(
     feedback: String?,
     isRewardedAdReady: Boolean,
     onPurchaseBooster: (BoosterType) -> Unit,
+    onPurchaseTacticalPack: () -> Unit,
     onUnlockOrEquipSkin: (CannonSkin) -> Unit,
     onWatchAdForCoins: () -> Unit,
     onDismiss: () -> Unit
@@ -1752,6 +1953,50 @@ private fun CosmicArmoryDialog(
                 }
 
                 if (selectedTab == 0) {
+                    Surface(
+                        color = AstroMagenta.copy(alpha = 0.14f),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.2.dp, AstroMagenta.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = TacticalPackSpec.TITLE,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = AstroGold
+                                )
+                                Text(
+                                    text = TacticalPackSpec.SUBTITLE,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = StarlightWhite
+                                )
+                            }
+                            Spacer(modifier = Modifier.size(8.dp))
+                            Button(
+                                onClick = onPurchaseTacticalPack,
+                                enabled = coins >= TacticalPackSpec.COIN_COST,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = AstroMagenta,
+                                    contentColor = StarlightWhite
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .height(48.dp)
+                                    .testTag("buy_tactical_pack_button")
+                            ) {
+                                Text("${TacticalPackSpec.COIN_COST}c", style = MaterialTheme.typography.labelLarge)
+                            }
+                        }
+                    }
+
                     BoosterType.entries.forEach { booster ->
                         val owned = when (booster) {
                             BoosterType.BOMB -> profile?.bombBoosters ?: 0L
@@ -2138,7 +2383,13 @@ private fun BadgePill(icon: androidx.compose.ui.graphics.vector.ImageVector, tin
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
-            Text(text = text, style = MaterialTheme.typography.labelSmall, color = StarlightWhite)
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall,
+                color = StarlightWhite,
+                maxLines = 1,
+                softWrap = false
+            )
         }
     }
 }

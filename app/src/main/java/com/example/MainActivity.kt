@@ -1,7 +1,9 @@
 package com.example
 
+import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
@@ -51,7 +53,10 @@ import com.google.firebase.firestore.FirebaseFirestore
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT)
+        )
         setContent {
             AstroPopTheme {
                 AstroPopRoot()
@@ -214,7 +219,12 @@ private fun AstroPopPlayFlow(
                 activeMode = GameMode.BLITZ
                 gameViewModel.startBlitzMode(profile, booster, adFree)
             },
+            onPlayBossRush = { booster, adFree ->
+                activeMode = GameMode.BOSS_RUSH
+                gameViewModel.startBossRushMode(profile, booster, adFree)
+            },
             onPurchaseBooster = profileViewModel::purchaseBooster,
+            onPurchaseTacticalPack = profileViewModel::purchaseTacticalPack,
             onUnlockOrEquipSkin = profileViewModel::unlockOrEquipSkin,
             onClaimQuest = profileViewModel::claimQuest,
             onClaimDailySupply = profileViewModel::claimDailySupply,
@@ -290,6 +300,7 @@ private fun AstroPopPlayFlow(
                         GameMode.SAGA -> gameViewModel.startSagaLevel(activeLevel, profile)
                         GameMode.DAILY -> gameViewModel.startDailyChallenge(profile)
                         GameMode.BLITZ -> gameViewModel.startBlitzMode(profile)
+                        GameMode.BOSS_RUSH -> gameViewModel.startBossRushMode(profile)
                         GameMode.ENDLESS, null -> gameViewModel.startEndlessMode(profile)
                     }
                 }

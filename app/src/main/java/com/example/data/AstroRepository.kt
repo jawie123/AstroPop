@@ -342,6 +342,39 @@ class AstroRepository(
         }
     }
 
+    suspend fun purchaseTacticalPack(userId: String): Result<Unit> {
+        val path = "users/$userId"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user mismatch" }
+            val docRef = db.collection("users").document(uid)
+            db.runTransaction { tx ->
+                val snap = tx.get(docRef)
+                val coins = (snap.getLong("starCoins") ?: 0L).coerceAtLeast(0L)
+                check(coins >= TacticalPackSpec.COIN_COST) { "Not enough Star Coins" }
+                val bombs = (snap.getLong("bombBoosters") ?: 0L).coerceAtLeast(0L)
+                val prisms = (snap.getLong("prismBoosters") ?: 0L).coerceAtLeast(0L)
+                val lasers = (snap.getLong("laserBoosters") ?: 0L).coerceAtLeast(0L)
+                tx.update(
+                    docRef,
+                    mapOf(
+                        "starCoins" to (coins - TacticalPackSpec.COIN_COST),
+                        "bombBoosters" to (bombs + 1L).coerceAtMost(999L),
+                        "prismBoosters" to (prisms + 1L).coerceAtMost(999L),
+                        "laserBoosters" to (lasers + 1L).coerceAtMost(999L),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun spendCoinsForExtraShots(userId: String, cost: Long): Result<Unit> {
         val path = "users/$userId"
         return try {
@@ -1021,6 +1054,85 @@ class AstroRepository(
                     mapOf(
                         "mode" to GameMode.DAILY.name,
                         "levelNumber" to 0L,
+                        "score" to safeScore,
+                        "maxCombo" to safeCombo,
+                        "bubblesPopped" to safePopped,
+                        "starsEarned" to safeStars,
+                        "createdAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, userDocPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun recordBossRushResult(
+        userId: String,
+        wavesCleared: Int,
+        score: Long,
+        maxCombo: Int,
+        bubblesPopped: Int,
+        won: Boolean,
+        coinsEarned: Long
+    ): Result<Unit> {
+        val safeWaves = wavesCleared.coerceIn(0, 5).toLong()
+        val safeScore = score.coerceIn(0L, 100_000_000L)
+        val safeCombo = maxCombo.coerceIn(0, 10_000).toLong()
+        val safePopped = bubblesPopped.coerceIn(0, 100_000).toLong()
+        val safeCoins = coinsEarned.coerceIn(0L, 50_000L)
+        val safeStars = if (won) 3L else (safeWaves / 2L).coerceIn(0L, 2L)
+        val userDocPath = "users/$userId"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user mismatch" }
+            val userRef = db.collection("users").document(uid)
+            val runRef = userRef.collection("runs").document()
+
+            db.runTransaction { tx ->
+                val userSnap = tx.get(userRef)
+                val prevEndless = (userSnap.getLong("endlessHighScore") ?: 0L).coerceAtLeast(0L)
+                val prevBlitz = (userSnap.getLong("blitzHighScore") ?: 0L).coerceAtLeast(0L)
+                val prevStars = (userSnap.getLong("totalStars") ?: 0L).coerceAtLeast(0L)
+                val prevTotalPopped = (userSnap.getLong("totalBubblesPopped") ?: 0L).coerceAtLeast(0L)
+                val prevCoins = (userSnap.getLong("starCoins") ?: 150L).coerceAtLeast(0L)
+                val prevLasers = (userSnap.getLong("laserBoosters") ?: 1L).coerceAtLeast(0L)
+                val displayName = userSnap.getString("displayName") ?: "StarCaptain"
+                val equippedSkin = userSnap.getString("equippedSkin") ?: CannonSkin.CYAN_INTERCEPTOR.name
+                val nextTotalPopped = (prevTotalPopped + safePopped).coerceAtMost(100_000_000L)
+
+                val updates = mutableMapOf<String, Any>(
+                    "totalBubblesPopped" to nextTotalPopped,
+                    "starCoins" to (prevCoins + safeCoins).coerceAtMost(100_000_000L),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                if (won) {
+                    updates["laserBoosters"] = (prevLasers + 1L).coerceAtMost(999L)
+                }
+                tx.update(userRef, updates)
+
+                tx.set(
+                    db.collection("leaderboard").document(uid),
+                    buildLeaderboardPayload(
+                        uid = uid,
+                        displayName = displayName,
+                        endlessHighScore = prevEndless,
+                        blitzHighScore = prevBlitz,
+                        totalStars = prevStars,
+                        totalBubblesPopped = nextTotalPopped,
+                        equippedSkin = equippedSkin
+                    )
+                )
+
+                tx.set(
+                    runRef,
+                    mapOf(
+                        "mode" to GameMode.BOSS_RUSH.name,
+                        "levelNumber" to safeWaves,
                         "score" to safeScore,
                         "maxCombo" to safeCombo,
                         "bubblesPopped" to safePopped,

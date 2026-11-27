@@ -77,7 +77,7 @@ service cloud.firestore {
     }
 
     function isValidGameRun(data) {
-      return data.mode is string && data.mode in ['SAGA', 'ENDLESS', 'DAILY', 'BLITZ'] &&
+      return data.mode is string && data.mode in ['SAGA', 'ENDLESS', 'DAILY', 'BLITZ', 'BOSS_RUSH'] &&
              data.levelNumber is int && data.levelNumber >= 0 && data.levelNumber <= 30 &&
              data.score is int && data.score >= 0 && data.score <= 100000000 &&
              data.maxCombo is int && data.maxCombo >= 0 && data.maxCombo <= 10000 &&

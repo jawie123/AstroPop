@@ -19,6 +19,7 @@ interface GameProgressStore {
     suspend fun updatePreferences(soundEnabled: Boolean, hapticsEnabled: Boolean): Result<Unit>
     suspend fun consumeBooster(booster: BoosterType): Result<Unit>
     suspend fun purchaseBooster(booster: BoosterType): Result<Unit>
+    suspend fun purchaseTacticalPack(): Result<Unit>
     suspend fun spendCoinsForExtraShots(cost: Long): Result<Unit>
     suspend fun grantAdRewardCoins(coins: Long): Result<Unit>
     suspend fun unlockOrEquipSkin(skin: CannonSkin): Result<Unit>
@@ -47,6 +48,14 @@ interface GameProgressStore {
         score: Long,
         maxCombo: Int,
         bubblesPopped: Int,
+        coinsEarned: Long
+    ): Result<Unit>
+    suspend fun recordBossRushResult(
+        wavesCleared: Int,
+        score: Long,
+        maxCombo: Int,
+        bubblesPopped: Int,
+        won: Boolean,
         coinsEarned: Long
     ): Result<Unit>
     suspend fun recordDailyChallengeResult(
@@ -86,6 +95,9 @@ class FirestoreProgressStore(
 
     override suspend fun purchaseBooster(booster: BoosterType): Result<Unit> =
         repository.purchaseBooster(userId, booster)
+
+    override suspend fun purchaseTacticalPack(): Result<Unit> =
+        repository.purchaseTacticalPack(userId)
 
     override suspend fun spendCoinsForExtraShots(cost: Long): Result<Unit> =
         repository.spendCoinsForExtraShots(userId, cost)
@@ -158,6 +170,23 @@ class FirestoreProgressStore(
         score = score,
         maxCombo = maxCombo,
         bubblesPopped = bubblesPopped,
+        coinsEarned = coinsEarned
+    )
+
+    override suspend fun recordBossRushResult(
+        wavesCleared: Int,
+        score: Long,
+        maxCombo: Int,
+        bubblesPopped: Int,
+        won: Boolean,
+        coinsEarned: Long
+    ): Result<Unit> = repository.recordBossRushResult(
+        userId = userId,
+        wavesCleared = wavesCleared,
+        score = score,
+        maxCombo = maxCombo,
+        bubblesPopped = bubblesPopped,
+        won = won,
         coinsEarned = coinsEarned
     )
 
@@ -259,6 +288,22 @@ class GuestProgressStore(context: Context) : GameProgressStore {
             BoosterType.LASER -> current.copy(starCoins = nextCoins, laserBoosters = current.laserBoosters + 1L)
         }
         saveProfile(updated)
+        return Result.success(Unit)
+    }
+
+    override suspend fun purchaseTacticalPack(): Result<Unit> {
+        val current = profileFlow.value ?: loadProfile()
+        if (current.starCoins < TacticalPackSpec.COIN_COST) {
+            return Result.failure(IllegalStateException("Not enough Star Coins"))
+        }
+        saveProfile(
+            current.copy(
+                starCoins = current.starCoins - TacticalPackSpec.COIN_COST,
+                bombBoosters = (current.bombBoosters + 1L).coerceAtMost(999L),
+                prismBoosters = (current.prismBoosters + 1L).coerceAtMost(999L),
+                laserBoosters = (current.laserBoosters + 1L).coerceAtMost(999L)
+            )
+        )
         return Result.success(Unit)
     }
 
@@ -530,6 +575,38 @@ class GuestProgressStore(context: Context) : GameProgressStore {
                 maxCombo = maxCombo.coerceAtLeast(0).toLong(),
                 bubblesPopped = bubblesPopped.coerceAtLeast(0).toLong(),
                 starsEarned = 0L
+            )
+        )
+        return Result.success(Unit)
+    }
+
+    override suspend fun recordBossRushResult(
+        wavesCleared: Int,
+        score: Long,
+        maxCombo: Int,
+        bubblesPopped: Int,
+        won: Boolean,
+        coinsEarned: Long
+    ): Result<Unit> {
+        val safeWaves = wavesCleared.coerceIn(0, 5)
+        val safeScore = score.coerceAtLeast(0L)
+        val currentProfile = profileFlow.value ?: loadProfile()
+        saveProfile(
+            currentProfile.copy(
+                totalBubblesPopped = currentProfile.totalBubblesPopped + bubblesPopped.coerceAtLeast(0).toLong(),
+                starCoins = currentProfile.starCoins + coinsEarned.coerceAtLeast(0L),
+                laserBoosters = if (won) (currentProfile.laserBoosters + 1L).coerceAtMost(999L) else currentProfile.laserBoosters
+            )
+        )
+        prependRun(
+            GameRun(
+                id = UUID.randomUUID().toString(),
+                mode = GameMode.BOSS_RUSH.name,
+                levelNumber = safeWaves.toLong(),
+                score = safeScore,
+                maxCombo = maxCombo.coerceAtLeast(0).toLong(),
+                bubblesPopped = bubblesPopped.coerceAtLeast(0).toLong(),
+                starsEarned = if (won) 3L else (safeWaves / 2).toLong().coerceIn(0L, 2L)
             )
         )
         return Result.success(Unit)

@@ -72,6 +72,8 @@ data class GameUiState(
     val bossHp: Int = 0,
     val bossMaxHp: Int = 0,
     val bossCounterCountdown: Int = 0,
+    val bossWaveIndex: Int = 1,
+    val bossWaveTotal: Int = 5,
     val isDangerPanic: Boolean = false,
     val swapHintPulse: Boolean = false,
     val canBuySecondChance: Boolean = false,
@@ -112,6 +114,7 @@ class GameViewModel(
         private const val MAX_PARTICLES = 90
         const val SECOND_CHANCE_COST = 60L
         const val BLITZ_DURATION_SECONDS = 120
+        val BOSS_RUSH_STAGES = listOf(6, 12, 18, 24, 30)
     }
 
     fun syncProfileMetadata(profile: PlayerProfile?) {
@@ -184,6 +187,23 @@ class GameViewModel(
     ) {
         startArcadeSession(
             mode = GameMode.BLITZ,
+            profile = profile,
+            starterBooster = starterBooster,
+            starterAdFree = starterAdFree
+        )
+    }
+
+    fun startBossRushMode(
+        profile: PlayerProfile?,
+        starterBooster: BoosterType? = null,
+        starterAdFree: Boolean = false
+    ) {
+        val baseSpec = LevelCatalog.getLevel(BOSS_RUSH_STAGES.first())
+        val rushSpec = baseSpec.copy(movesLimit = 35)
+        startBoardSession(
+            mode = GameMode.BOSS_RUSH,
+            spec = rushSpec,
+            initialGrid = LevelCatalog.buildGridForLevel(rushSpec),
             profile = profile,
             starterBooster = starterBooster,
             starterAdFree = starterAdFree
@@ -288,6 +308,8 @@ class GameViewModel(
                 bossHp = boss?.maxHp ?: 0,
                 bossMaxHp = boss?.maxHp ?: 0,
                 bossCounterCountdown = boss?.counterInterval ?: 0,
+                bossWaveIndex = 1,
+                bossWaveTotal = BOSS_RUSH_STAGES.size,
                 canBuySecondChance = false,
                 canWatchAdSecondChance = false,
                 usedSecondChance = false,
@@ -1104,13 +1126,41 @@ class GameViewModel(
             feverBonusShot = if (Random.nextBoolean()) ShotType.BOMB else ShotType.PRISM
             soundSynth.playOverdrive()
             mutableShockwaves.add(ShockwaveFx(shooterPos, boardWidth * 0.55f, AstroGold))
+            // Fever Breach: crack ICE & SHIELDED armor on the lowest 2 occupied rows
+            val lowestOccupiedRow = newGrid.keys.maxOfOrNull { it.first }
+            if (lowestOccupiedRow != null) {
+                var crackedCount = 0
+                for ((k, cell) in newGrid.entries.toList()) {
+                    if (k.first >= lowestOccupiedRow - 1 && (cell.kind == TileKind.ICE || cell.kind == TileKind.SHIELDED)) {
+                        newGrid[k] = cell.copy(kind = TileKind.NORMAL, wobble = 1f)
+                        crackedCount++
+                    }
+                }
+                if (crackedCount > 0) {
+                    mutablePopups.add(
+                        FloatingPopup(++popupCounter, boardWidth / 2f, shooterPos.y - 125f, "FEVER BREACH! $crackedCount CRACKED", AstroCyan)
+                    )
+                }
+            }
+        }
+
+        val comboMilestoneCoins = when {
+            didClear && nextCombo == 5 -> 5L
+            didClear && nextCombo == 8 -> 12L
+            else -> 0L
+        }
+        if (comboMilestoneCoins > 0L) {
+            soundSynth.playCoin()
+            mutablePopups.add(
+                FloatingPopup(++popupCounter, shooterPos.x, shooterPos.y - 140f, "${nextCombo}x STREAK +${comboMilestoneCoins}c!", AstroGold)
+            )
         }
 
         var nextMoves = s.movesRemaining
         var nextShotsUntilDescent = s.endlessShotsUntilDescent
         var nextWave = s.endlessWave
 
-        if (s.mode == GameMode.SAGA || s.mode == GameMode.DAILY) {
+        if (s.mode == GameMode.SAGA || s.mode == GameMode.DAILY || s.mode == GameMode.BOSS_RUSH) {
             if (!wasSpecialShot) {
                 nextMoves = (s.movesRemaining - 1).coerceAtLeast(0)
             }
@@ -1140,13 +1190,18 @@ class GameViewModel(
             }
         }
 
-        // Cosmic Guardian Boss Combat (Stages 6, 12, 18)
+        // Cosmic Guardian Boss Combat (Saga Bosses & Boss Rush Gauntlet)
+        var activeSpec = s.levelSpec
+        var activeBossName = s.bossName
+        var activeBossMaxHp = s.bossMaxHp
+        var activeBossWave = s.bossWaveIndex
         var nextBossHp = s.bossHp
         var nextBossCountdown = s.bossCounterCountdown
         var bossClearBonusScore = 0L
         var bossClearBonusCoins = 0L
-        val bossSpec = s.levelSpec.bossSpec
-        if (bossSpec != null && s.bossMaxHp > 0 && nextBossHp > 0) {
+        var bossRushWonAll = false
+        val bossSpec = activeSpec.bossSpec
+        if (bossSpec != null && activeBossMaxHp > 0 && nextBossHp > 0) {
             val damage = (if (didClear) (matchedCount / 2).coerceAtLeast(1) else 0) +
                 topRowHits * 2 +
                 (avalancheCount / 2) +
@@ -1170,9 +1225,6 @@ class GameViewModel(
                     bossClearBonusCoins = 40L
                     soundSynth.playBomb()
                     mutableShockwaves.add(ShockwaveFx(bossCenter, boardWidth * 0.85f, AstroGold))
-                    mutablePopups.add(
-                        FloatingPopup(++popupCounter, bossCenter.x, bossCenter.y + 52f, "BOSS SHATTERED! +1500", AstroGold)
-                    )
                     val radius = if (boardWidth > 0f) HexGridEngine.bubbleRadius(boardWidth) else 24f
                     for (cell in newGrid.values.toList()) {
                         val c = HexGridEngine.cellCenter(cell.row, cell.col, boardWidth, radius, topOffset)
@@ -1187,6 +1239,38 @@ class GameViewModel(
                         )
                     }
                     newGrid.clear()
+
+                    if (s.mode == GameMode.BOSS_RUSH && activeBossWave < s.bossWaveTotal) {
+                        activeBossWave++
+                        val nextStageSpec = LevelCatalog.getLevel(BOSS_RUSH_STAGES[activeBossWave - 1])
+                        activeSpec = nextStageSpec.copy(movesLimit = nextMoves + 12)
+                        newGrid.putAll(LevelCatalog.buildGridForLevel(activeSpec))
+                        val nextBoss = nextStageSpec.bossSpec!!
+                        activeBossName = nextBoss.name
+                        activeBossMaxHp = nextBoss.maxHp
+                        nextBossHp = nextBoss.maxHp
+                        nextBossCountdown = nextBoss.counterInterval
+                        nextMoves += 12
+                        bossClearBonusCoins = 50L
+                        mutablePopups.add(
+                            FloatingPopup(
+                                ++popupCounter,
+                                bossCenter.x,
+                                bossCenter.y + 54f,
+                                "WAVE $activeBossWave/5: ${nextBoss.name.uppercase()}! +12 SHOTS",
+                                AstroGold
+                            )
+                        )
+                    } else {
+                        if (s.mode == GameMode.BOSS_RUSH) {
+                            bossRushWonAll = true
+                            bossClearBonusScore = 3000L
+                            bossClearBonusCoins = 120L
+                        }
+                        mutablePopups.add(
+                            FloatingPopup(++popupCounter, bossCenter.x, bossCenter.y + 52f, "BOSS SHATTERED! +$bossClearBonusScore", AstroGold)
+                        )
+                    }
                 }
             } else {
                 nextBossCountdown--
@@ -1215,26 +1299,27 @@ class GameViewModel(
 
         val isVictory = when (s.mode) {
             GameMode.SAGA, GameMode.DAILY -> when {
-                s.bossMaxHp > 0 && nextBossHp <= 0 -> true
-                s.bossMaxHp > 0 -> false
-                s.levelSpec.goal == LevelGoal.RESCUE_STARS -> starsLeft == 0 || newGrid.isEmpty()
+                activeBossMaxHp > 0 && nextBossHp <= 0 -> true
+                activeBossMaxHp > 0 -> false
+                activeSpec.goal == LevelGoal.RESCUE_STARS -> starsLeft == 0 || newGrid.isEmpty()
                 else -> newGrid.isEmpty()
             }
+            GameMode.BOSS_RUSH -> bossRushWonAll
             GameMode.ENDLESS, GameMode.BLITZ -> false
         }
 
         val isDefeat = when (s.mode) {
-            GameMode.SAGA, GameMode.DAILY -> !isVictory && (dangerReached || nextMoves <= 0)
+            GameMode.SAGA, GameMode.DAILY, GameMode.BOSS_RUSH -> !isVictory && (dangerReached || nextMoves <= 0)
             GameMode.ENDLESS, GameMode.BLITZ -> dangerReached
         }
 
-        val isSagaOrDaily = s.mode == GameMode.SAGA || s.mode == GameMode.DAILY
-        val moveBonus = if (isVictory && isSagaOrDaily) nextMoves * 150L else 0L
-        val fireworksBonusCoins = if (isVictory && isSagaOrDaily && nextMoves > 0) nextMoves * 3L else 0L
+        val isLimitedShotMode = s.mode == GameMode.SAGA || s.mode == GameMode.DAILY || s.mode == GameMode.BOSS_RUSH
+        val moveBonus = if (isVictory && isLimitedShotMode) nextMoves * 150L else 0L
+        val fireworksBonusCoins = if (isVictory && isLimitedShotMode && nextMoves > 0) nextMoves * 3L else 0L
         val finalScore = s.score + gainedScore + bossClearBonusScore + moveBonus
         val totalPopped = s.totalPoppedInRun + matchedCount
 
-        val allowed = if (isSagaOrDaily) s.levelSpec.allowedColors else BubbleColor.entries
+        val allowed = if (isLimitedShotMode) activeSpec.allowedColors else BubbleColor.entries
         val activeColors = availableBoardColors(newGrid, allowed)
 
         val upcomingThird = if (feverBonusShot != null) {
@@ -1259,28 +1344,36 @@ class GameViewModel(
             else -> GameStatus.PLAYING
         }
 
-        val starsEarned = if (isVictory && isSagaOrDaily) {
-            val (s1, s2, s3) = s.levelSpec.starThresholds
+        val starsEarned = if (isVictory && (s.mode == GameMode.SAGA || s.mode == GameMode.DAILY)) {
+            val (s1, s2, s3) = activeSpec.starThresholds
             when {
                 finalScore >= s3 -> 3
                 finalScore >= s2 -> 2
                 finalScore >= s1 -> 1
                 else -> 1
             }
-        } else 0
+        } else if (isVictory && s.mode == GameMode.BOSS_RUSH) 3 else 0
 
-        val rewardBooster = if (isVictory && s.mode == GameMode.SAGA && starsEarned == 3) {
-            BoosterType.entries[s.levelSpec.levelNumber % BoosterType.entries.size]
-        } else null
+        val rewardBooster = when {
+            isVictory && s.mode == GameMode.SAGA && starsEarned == 3 ->
+                BoosterType.entries[activeSpec.levelNumber % BoosterType.entries.size]
+            isVictory && s.mode == GameMode.BOSS_RUSH -> BoosterType.LASER
+            else -> null
+        }
+
+        val updatedWellCoins = s.wellBonusCoins + comboMilestoneCoins +
+            if (s.mode == GameMode.BOSS_RUSH && activeBossWave > s.bossWaveIndex) bossClearBonusCoins else 0L
 
         val baseCoinsEarned = when {
+            nextStatus == GameStatus.WON && s.mode == GameMode.BOSS_RUSH -> 220L + bossClearBonusCoins + fireworksBonusCoins
             nextStatus == GameStatus.WON && s.mode == GameMode.DAILY -> 120L + starsEarned * 15L + fireworksBonusCoins
             nextStatus == GameStatus.WON && s.mode == GameMode.SAGA -> 35L + starsEarned * 15L + bossClearBonusCoins + fireworksBonusCoins
+            nextStatus == GameStatus.LOST && s.mode == GameMode.BOSS_RUSH -> ((activeBossWave - 1) * 20L + totalPopped / 4L).coerceAtLeast(15L)
             nextStatus == GameStatus.LOST && (s.mode == GameMode.ENDLESS || s.mode == GameMode.BLITZ) -> (totalPopped / 3L).coerceAtLeast(10L)
             nextStatus == GameStatus.LOST -> (totalPopped / 5L).coerceAtLeast(5L)
             else -> 0L
         }
-        val coinsEarned = baseCoinsEarned + s.wellBonusCoins
+        val coinsEarned = baseCoinsEarned + updatedWellCoins
 
         if (nextStatus == GameStatus.WON) {
             soundSynth.playVictory()
@@ -1348,6 +1441,7 @@ class GameViewModel(
 
         _state.update {
             it.copy(
+                levelSpec = activeSpec,
                 currentShot = queuedCurrent,
                 nextShot = queuedNext,
                 thirdShot = upcomingThird,
@@ -1361,12 +1455,16 @@ class GameViewModel(
                 overdriveTurnsRemaining = nextOverdrive,
                 totalPoppedInRun = totalPopped,
                 starsRemaining = starsLeft,
+                bossName = activeBossName,
                 bossHp = nextBossHp,
+                bossMaxHp = activeBossMaxHp,
                 bossCounterCountdown = nextBossCountdown,
+                bossWaveIndex = activeBossWave,
                 status = nextStatus,
                 earnedStars = starsEarned,
                 earnedBooster = rewardBooster,
                 coinsEarnedThisRun = coinsEarned,
+                wellBonusCoins = updatedWellCoins,
                 canBuySecondChance = canSecondChance,
                 canWatchAdSecondChance = canAdSecondChance,
                 isDangerPanic = panic,
@@ -1455,6 +1553,14 @@ class GameViewModel(
                     score = s.score,
                     maxCombo = s.maxCombo,
                     bubblesPopped = s.totalPoppedInRun,
+                    coinsEarned = s.coinsEarnedThisRun
+                )
+                GameMode.BOSS_RUSH -> store.recordBossRushResult(
+                    wavesCleared = if (won) s.bossWaveTotal else (s.bossWaveIndex - 1).coerceAtLeast(0),
+                    score = s.score,
+                    maxCombo = s.maxCombo,
+                    bubblesPopped = s.totalPoppedInRun,
+                    won = won,
                     coinsEarned = s.coinsEarnedThisRun
                 )
             }

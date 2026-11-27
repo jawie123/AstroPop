@@ -125,6 +125,17 @@ class ProfileViewModel(
         }
     }
 
+    fun purchaseTacticalPack() {
+        viewModelScope.launch {
+            val result = store.purchaseTacticalPack()
+            _shopFeedback.value = if (result.isSuccess) {
+                "Equipped +1 Bomb, +1 Prism & +1 Laser!"
+            } else {
+                result.exceptionOrNull()?.localizedMessage ?: "Not enough Star Coins"
+            }
+        }
+    }
+
     fun unlockOrEquipSkin(skin: CannonSkin) {
         viewModelScope.launch {
             val result = store.unlockOrEquipSkin(skin)
