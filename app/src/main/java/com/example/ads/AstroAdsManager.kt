@@ -29,14 +29,21 @@ import com.google.android.gms.ads.interstitial.InterstitialAd
 import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
 import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
+import com.google.android.ump.ConsentInformation
+import com.google.android.ump.ConsentRequestParameters
+import com.google.android.ump.UserMessagingPlatform
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.atomic.AtomicBoolean
 
 class AstroAdsManager(context: Context) {
 
     private val appContext = context.applicationContext
-    private var initialized = false
+    private val consentInformation: ConsentInformation =
+        UserMessagingPlatform.getConsentInformation(appContext)
+    private val mobileAdsInitialized = AtomicBoolean(false)
+    private var consentRequested = false
     private var interstitialAd: InterstitialAd? = null
     private var isLoadingInterstitial = false
     private var rewardedAd: RewardedAd? = null
@@ -46,16 +53,82 @@ class AstroAdsManager(context: Context) {
     private val _isRewardedReady = MutableStateFlow(false)
     val isRewardedReady: StateFlow<Boolean> = _isRewardedReady.asStateFlow()
 
-    fun initialize() {
-        if (initialized) return
-        initialized = true
+    private val _canRequestAds = MutableStateFlow(consentInformation.canRequestAds())
+    val canRequestAds: StateFlow<Boolean> = _canRequestAds.asStateFlow()
+
+    private val _isPrivacyOptionsRequired = MutableStateFlow(
+        consentInformation.privacyOptionsRequirementStatus ==
+            ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED
+    )
+    val isPrivacyOptionsRequired: StateFlow<Boolean> = _isPrivacyOptionsRequired.asStateFlow()
+
+    fun initialize(activity: Activity? = null) {
+        if (consentInformation.canRequestAds()) {
+            initializeMobileAdsSdk()
+        }
+        if (consentRequested || activity == null) return
+        consentRequested = true
+
+        val params = ConsentRequestParameters.Builder().build()
+        consentInformation.requestConsentInfoUpdate(
+            activity,
+            params,
+            {
+                UserMessagingPlatform.loadAndShowConsentFormIfRequired(activity) { formError ->
+                    if (formError != null) {
+                        Log.w(TAG, "UMP consent form error: ${formError.message}")
+                    }
+                    refreshConsentFlags()
+                    if (consentInformation.canRequestAds()) {
+                        initializeMobileAdsSdk()
+                    }
+                }
+            },
+            { requestError ->
+                Log.w(TAG, "UMP consent info update failed: ${requestError.message}")
+                refreshConsentFlags()
+                if (consentInformation.canRequestAds()) {
+                    initializeMobileAdsSdk()
+                }
+            }
+        )
+    }
+
+    private fun refreshConsentFlags() {
+        _canRequestAds.value = consentInformation.canRequestAds()
+        _isPrivacyOptionsRequired.value =
+            consentInformation.privacyOptionsRequirementStatus ==
+                ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED
+    }
+
+    private fun initializeMobileAdsSdk() {
+        _canRequestAds.value = true
+        if (mobileAdsInitialized.getAndSet(true)) return
         MobileAds.initialize(appContext) {
             preloadInterstitial()
             preloadRewarded()
         }
     }
 
+    fun showPrivacyOptionsForm(activity: Activity?, onDismissed: () -> Unit = {}) {
+        if (activity == null) {
+            onDismissed()
+            return
+        }
+        UserMessagingPlatform.showPrivacyOptionsForm(activity) { formError ->
+            if (formError != null) {
+                Log.w(TAG, "Privacy options form error: ${formError.message}")
+            }
+            refreshConsentFlags()
+            if (consentInformation.canRequestAds()) {
+                initializeMobileAdsSdk()
+            }
+            onDismissed()
+        }
+    }
+
     fun preloadInterstitial() {
+        if (!consentInformation.canRequestAds()) return
         if (interstitialAd != null || isLoadingInterstitial) return
         isLoadingInterstitial = true
         val unitId = appContext.getString(R.string.admob_interstitial_unit_id)
@@ -79,6 +152,7 @@ class AstroAdsManager(context: Context) {
     }
 
     fun preloadRewarded() {
+        if (!consentInformation.canRequestAds()) return
         if (rewardedAd != null || isLoadingRewarded) return
         isLoadingRewarded = true
         val unitId = appContext.getString(R.string.admob_rewarded_unit_id)
@@ -106,7 +180,7 @@ class AstroAdsManager(context: Context) {
     fun maybeShowInterstitial(activity: Activity?, onContinue: () -> Unit) {
         completedRunCount++
         val ad = interstitialAd
-        if (completedRunCount % 2 != 0 || ad == null || activity == null) {
+        if (!consentInformation.canRequestAds() || completedRunCount % 2 != 0 || ad == null || activity == null) {
             if (ad == null) preloadInterstitial()
             onContinue()
             return
@@ -132,7 +206,7 @@ class AstroAdsManager(context: Context) {
         onUnavailable: () -> Unit
     ) {
         val ad = rewardedAd
-        if (ad == null || activity == null) {
+        if (!consentInformation.canRequestAds() || ad == null || activity == null) {
             preloadRewarded()
             onUnavailable()
             return
@@ -159,8 +233,11 @@ class AstroAdsManager(context: Context) {
 }
 
 @Composable
-fun AstroBannerAd(modifier: Modifier = Modifier) {
-    if (LocalInspectionMode.current) return
+fun AstroBannerAd(
+    canRequestAds: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    if (LocalInspectionMode.current || !canRequestAds) return
     val context = LocalContext.current
     val unitId = remember(context) { context.getString(R.string.admob_banner_unit_id) }
     val adView = remember(context, unitId) {

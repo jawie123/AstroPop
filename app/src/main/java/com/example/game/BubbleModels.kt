@@ -32,6 +32,7 @@ enum class BubbleColor(
 enum class TileKind {
     NORMAL,
     ICE,
+    SHIELDED,
     STONE,
     STAR_CORE,
     LIGHTNING,

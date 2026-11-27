@@ -37,8 +37,10 @@ import androidx.compose.material.icons.rounded.CardGiftcard
 import androidx.compose.material.icons.rounded.Casino
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.EmojiEvents
+import androidx.compose.material.icons.rounded.Leaderboard
 import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.RocketLaunch
@@ -93,9 +95,15 @@ import com.example.data.CannonSkin
 import com.example.data.CosmicQuest
 import com.example.data.DailySupplyCatalog
 import com.example.data.DailySupplyTier
+import com.example.data.GameMode
+import com.example.data.LeaderboardEntry
 import com.example.data.LevelProgress
+import com.example.data.MysteryChestReward
 import com.example.data.PilotRankInfo
 import com.example.data.PlayerProfile
+import com.example.data.SeasonPassCatalog
+import com.example.data.SeasonPassTier
+import com.example.data.UiState
 import com.example.data.WheelPrize
 import kotlinx.coroutines.launch
 import kotlin.math.PI
@@ -121,20 +129,28 @@ import com.example.ui.theme.StardustOutline
 fun SagaHomeScreen(
     profile: PlayerProfile?,
     levels: List<LevelProgress>,
+    leaderboardState: UiState<List<LeaderboardEntry>>,
     isGuest: Boolean,
     errorMessage: String?,
     shopFeedback: String?,
     isRewardedAdReady: Boolean,
-    onPlaySagaLevel: (Int) -> Unit,
-    onPlayDaily: () -> Unit,
-    onPlayEndless: () -> Unit,
+    canRequestAds: Boolean = true,
+    onPlaySagaLevel: (Int, BoosterType?, Boolean) -> Unit,
+    onPlayDaily: (BoosterType?, Boolean) -> Unit,
+    onPlayEndless: (BoosterType?, Boolean) -> Unit,
+    onPlayBlitz: (BoosterType?, Boolean) -> Unit,
     onPurchaseBooster: (BoosterType) -> Unit,
     onUnlockOrEquipSkin: (CannonSkin) -> Unit,
     onClaimQuest: (CosmicQuest) -> Unit,
     onClaimDailySupply: (String) -> Unit,
     onClaimWheelPrize: (WheelPrize, String, Boolean) -> Unit,
+    onClaimPassReward: (SeasonPassTier, Boolean) -> Unit,
+    onOpenMysteryChest: (String, Boolean, (MysteryChestReward) -> Unit) -> Unit,
     onWatchAdForCoins: () -> Unit,
     onWatchAdForSpin: (() -> Unit) -> Unit,
+    onWatchAdForChest: (() -> Unit) -> Unit,
+    onWatchAdForPassBonus: (() -> Unit) -> Unit,
+    onWatchAdForStarterBomb: (() -> Unit) -> Unit,
     onClearShopFeedback: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
@@ -144,15 +160,27 @@ fun SagaHomeScreen(
     val dailyCompletedToday = profile?.lastDailyDay == todayKey
     val supplyAvailableToday = profile?.lastLoginRewardDate != todayKey
     val freeSpinAvailableToday = profile?.lastWheelSpinDate != todayKey
+    val freeChestAvailableToday = profile?.lastMysteryChestDate != todayKey
     val pilotRank = remember(profile) { (profile ?: PlayerProfile()).pilotRank() }
     var showArmoryDialog by remember { mutableStateOf(false) }
     var showQuestsDialog by remember { mutableStateOf(false) }
     var showCodexDialog by remember { mutableStateOf(false) }
     var showDailySupplyDialog by remember { mutableStateOf(false) }
     var showLuckyWheelDialog by remember { mutableStateOf(false) }
+    var showLeaderboardDialog by remember { mutableStateOf(false) }
+    var showSeasonPassDialog by remember { mutableStateOf(false) }
+    var showMysteryChestDialog by remember { mutableStateOf(false) }
+    var pendingLaunch by remember { mutableStateOf<PendingMissionLaunch?>(null) }
+
     val claimableQuestCount = remember(profile) {
         if (profile == null) 0
         else CosmicQuest.entries.count { it.isCompleted(profile) && it.id !in profile.claimedQuests }
+    }
+    val claimablePassCount = remember(profile, pilotRank) {
+        if (profile == null) 0
+        else SeasonPassCatalog.tiers.count { tier ->
+            pilotRank.xp >= tier.requiredXp && tier.freeKey !in profile.claimedPassTiers
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -413,6 +441,96 @@ fun SagaHomeScreen(
                     }
                 }
 
+                // Quick Action Row 2: Mystery Star Chest & Cosmic Season Pass
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        QuickPerkCard(
+                            title = "Mystery Chest",
+                            subtitle = if (freeChestAvailableToday) "Free Vault Ready!" else "Bonus Ad Chest",
+                            badgeText = if (freeChestAvailableToday) "OPEN FREE" else "JACKPOT",
+                            accent = if (freeChestAvailableToday) AstroMagenta else AstroViolet,
+                            icon = Icons.Rounded.CardGiftcard,
+                            highlighted = freeChestAvailableToday,
+                            onClick = {
+                                onClearShopFeedback()
+                                showMysteryChestDialog = true
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("open_mystery_chest_button")
+                        )
+                        QuickPerkCard(
+                            title = "Season Pass",
+                            subtitle = if (claimablePassCount > 0) "$claimablePassCount Tier(s) Ready!" else "12 Milestone Tiers",
+                            badgeText = if (claimablePassCount > 0) "CLAIM $claimablePassCount!" else "XP TRACK",
+                            accent = if (claimablePassCount > 0) AstroEmerald else AstroCyan,
+                            icon = Icons.Rounded.WorkspacePremium,
+                            highlighted = claimablePassCount > 0,
+                            onClick = {
+                                onClearShopFeedback()
+                                showSeasonPassDialog = true
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("open_season_pass_button")
+                        )
+                    }
+                }
+
+                // Galactic Leaderboard Strip
+                item {
+                    Surface(
+                        color = NebulaSurface.copy(alpha = 0.92f),
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .minimumInteractiveComponentSize()
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable { showLeaderboardDialog = true }
+                            .border(1.dp, AstroGold.copy(alpha = 0.5f), RoundedCornerShape(18.dp))
+                            .testTag("open_leaderboard_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(Icons.Rounded.Leaderboard, contentDescription = "Global Leaderboard", tint = AstroGold)
+                                Column {
+                                    Text(
+                                        text = "Galactic Leaderboard",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = StarlightWhite
+                                    )
+                                    Text(
+                                        text = "Global rankings for Endless, Cosmic Blitz & Stars",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = StarlightMuted
+                                    )
+                                }
+                            }
+                            Surface(
+                                color = AstroGold.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text(
+                                    text = "RANKS",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AstroGold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Daily Cosmic Challenge Card
                 item {
                     Card(
@@ -488,7 +606,13 @@ fun SagaHomeScreen(
                                 }
 
                                 Button(
-                                    onClick = onPlayDaily,
+                                    onClick = {
+                                        pendingLaunch = PendingMissionLaunch(
+                                            mode = GameMode.DAILY,
+                                            title = "Daily Nebula",
+                                            subtitle = "Rescue the 3 Daily Star Cores for +120 Star Coins!"
+                                        )
+                                    },
                                     shape = RoundedCornerShape(16.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = if (dailyCompletedToday) AstroEmerald else AstroGold,
@@ -504,6 +628,96 @@ fun SagaHomeScreen(
                                         text = if (dailyCompletedToday) "Replay" else "Launch",
                                         style = MaterialTheme.typography.titleMedium
                                     )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Cosmic Blitz (2-Minute Time Attack) Banner
+                item {
+                    Card(
+                        shape = RoundedCornerShape(26.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(
+                                width = 1.5.dp,
+                                brush = Brush.horizontalGradient(listOf(AstroCyan, AstroGold)),
+                                shape = RoundedCornerShape(26.dp)
+                            )
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(
+                                            Color(0xFF0E294B),
+                                            Color(0xFF1F1D4C)
+                                        )
+                                    )
+                                )
+                                .padding(20.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Timer,
+                                            contentDescription = null,
+                                            tint = AstroCyan,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = "2:00 TIME ATTACK",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = AstroGold
+                                        )
+                                    }
+                                    Text(
+                                        text = "Cosmic Blitz",
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        color = StarlightWhite
+                                    )
+                                    Text(
+                                        text = "Blitz Best: ${profile?.blitzHighScore ?: 0}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = AstroCyan,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                Button(
+                                    onClick = {
+                                        pendingLaunch = PendingMissionLaunch(
+                                            mode = GameMode.BLITZ,
+                                            title = "Cosmic Blitz (2:00)",
+                                            subtitle = "Unlimited shots, auto waves — chase Gold Ace Medal (8,000+ pts)!"
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = AstroCyan,
+                                        contentColor = CosmicAbyss
+                                    ),
+                                    modifier = Modifier
+                                        .height(50.dp)
+                                        .testTag("play_blitz_button")
+                                ) {
+                                    Icon(Icons.Rounded.PlayArrow, contentDescription = null)
+                                    Spacer(modifier = Modifier.size(4.dp))
+                                    Text("Blitz", style = MaterialTheme.typography.titleMedium)
                                 }
                             }
                         }
@@ -575,7 +789,13 @@ fun SagaHomeScreen(
                                 }
 
                                 Button(
-                                    onClick = onPlayEndless,
+                                    onClick = {
+                                        pendingLaunch = PendingMissionLaunch(
+                                            mode = GameMode.ENDLESS,
+                                            title = "Endless Panic",
+                                            subtitle = "Survive escalating cosmic waves and set a Global Leaderboard record!"
+                                        )
+                                    },
                                     shape = RoundedCornerShape(16.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = AstroMagenta,
@@ -610,7 +830,7 @@ fun SagaHomeScreen(
                                 color = StarlightWhite
                             )
                             Text(
-                                text = "18 Constellation Stages across 3 Sectors",
+                                text = "${LevelCatalog.sagaLevels.size} Constellation Stages across 4 Sectors",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = StarlightMuted
                             )
@@ -644,14 +864,26 @@ fun SagaHomeScreen(
                         progress = progress,
                         isUnlocked = isUnlocked,
                         isCurrent = isCurrent,
-                        onClick = { if (isUnlocked) onPlaySagaLevel(spec.levelNumber) }
+                        onClick = {
+                            if (isUnlocked) {
+                                pendingLaunch = PendingMissionLaunch(
+                                    mode = GameMode.SAGA,
+                                    levelNumber = spec.levelNumber,
+                                    title = "Stage ${spec.levelNumber}: ${spec.title}",
+                                    subtitle = spec.subtitle
+                                )
+                            }
+                        }
                     )
                 }
 
                 item { Spacer(modifier = Modifier.height(16.dp)) }
             }
 
-            AstroBannerAd(modifier = Modifier.padding(top = 4.dp, bottom = 4.dp))
+            AstroBannerAd(
+                canRequestAds = canRequestAds,
+                modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+            )
         }
 
         if (showArmoryDialog) {
@@ -711,6 +943,78 @@ fun SagaHomeScreen(
                     onClearShopFeedback()
                     showLuckyWheelDialog = false
                 }
+            )
+        }
+
+        if (showLeaderboardDialog) {
+            LeaderboardDialog(
+                profile = profile,
+                leaderboardState = leaderboardState,
+                isGuest = isGuest,
+                onDismiss = { showLeaderboardDialog = false }
+            )
+        }
+
+        if (showSeasonPassDialog) {
+            SeasonPassDialog(
+                profile = profile,
+                feedback = shopFeedback,
+                isRewardedAdReady = isRewardedAdReady,
+                onClaimFree = { tier -> onClaimPassReward(tier, false) },
+                onWatchAdForBonus = { tier ->
+                    onWatchAdForPassBonus {
+                        onClaimPassReward(tier, true)
+                    }
+                },
+                onDismiss = {
+                    onClearShopFeedback()
+                    showSeasonPassDialog = false
+                }
+            )
+        }
+
+        if (showMysteryChestDialog) {
+            MysteryChestDialog(
+                profile = profile,
+                todayKey = todayKey,
+                feedback = shopFeedback,
+                isRewardedAdReady = isRewardedAdReady,
+                onOpenFreeChest = { onOpened ->
+                    onOpenMysteryChest(todayKey, true, onOpened)
+                },
+                onWatchAdForChest = { onOpened ->
+                    onWatchAdForChest {
+                        onOpenMysteryChest(todayKey, false, onOpened)
+                    }
+                },
+                onDismiss = {
+                    onClearShopFeedback()
+                    showMysteryChestDialog = false
+                }
+            )
+        }
+
+        pendingLaunch?.let { launch ->
+            fun dispatchLaunch(booster: BoosterType?, adFree: Boolean) {
+                pendingLaunch = null
+                when (launch.mode) {
+                    GameMode.SAGA -> onPlaySagaLevel(launch.levelNumber, booster, adFree)
+                    GameMode.DAILY -> onPlayDaily(booster, adFree)
+                    GameMode.ENDLESS -> onPlayEndless(booster, adFree)
+                    GameMode.BLITZ -> onPlayBlitz(booster, adFree)
+                }
+            }
+            MissionLoadoutDialog(
+                launch = launch,
+                profile = profile,
+                isRewardedAdReady = isRewardedAdReady,
+                onWatchAdForStarterBomb = {
+                    onWatchAdForStarterBomb {
+                        dispatchLaunch(BoosterType.BOMB, true)
+                    }
+                },
+                onLaunch = { chosen -> dispatchLaunch(chosen, false) },
+                onDismiss = { pendingLaunch = null }
             )
         }
     }
@@ -1763,7 +2067,9 @@ private fun CosmicQuestsDialog(
 @Composable
 private fun CosmicCodexDialog(onDismiss: () -> Unit) {
     val entries = listOf(
-        Triple("Boss Guardians (Stages 6, 12, 18)", "Every pop & avalanche damages the Sector Boss. Watch its countdown — it casts Frost curses if unchallenged!", DangerCrimson),
+        Triple("Shielded Armor (Stages 19–30)", "Titanium-plated bubbles resist direct matches — pop an adjacent cluster, or blast them with Nova Bombs & Lasers!", AstroCyan),
+        Triple("Cosmic Blitz (2:00 Time Attack)", "Race the 2-minute clock with unlimited shots and auto waves. Hit 8,000+ points for the Gold Ace Medal!", AstroGold),
+        Triple("Boss Guardians (Stages 6, 12, 18, 24, 30)", "Every pop & avalanche damages the Sector Boss. Watch its countdown — it casts Frost curses if unchallenged!", DangerCrimson),
         Triple("Smart Cluster Aim", "Hovering aim illuminates the exact 3+ bubble cluster you will detonate before you fire.", AstroCyan),
         Triple("x5 Well & Avalanche Bonus", "Land detached bubbles in the center x5 bucket for +3 Star Coins each! Drop 6+ bubbles at once for +1 Shot.", AstroGold),
         Triple("Overdrive 2X Fever", "Chain 5 consecutive popping shots to ignite Overdrive 2X — double points & instant row shockwaves!", AstroMagenta),

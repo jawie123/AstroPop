@@ -32,6 +32,7 @@ service cloud.firestore {
              data.highestUnlockedLevel is int && data.highestUnlockedLevel >= 1 && data.highestUnlockedLevel <= 30 &&
              data.totalStars is int && data.totalStars >= 0 && data.totalStars <= 500 &&
              data.endlessHighScore is int && data.endlessHighScore >= 0 && data.endlessHighScore <= 100000000 &&
+             (!('blitzHighScore' in data) || (data.blitzHighScore is int && data.blitzHighScore >= 0 && data.blitzHighScore <= 100000000)) &&
              data.totalBubblesPopped is int && data.totalBubblesPopped >= 0 && data.totalBubblesPopped <= 100000000 &&
              (!('starCoins' in data) || (data.starCoins is int && data.starCoins >= 0 && data.starCoins <= 100000000)) &&
              (!('dailyStreak' in data) || (data.dailyStreak is int && data.dailyStreak >= 0 && data.dailyStreak <= 3650)) &&
@@ -44,10 +45,25 @@ service cloud.firestore {
              (!('equippedSkin' in data) || (data.equippedSkin is string && data.equippedSkin in ['CYAN_INTERCEPTOR', 'SOLAR_VALKYRIE', 'PLASMA_NOVA', 'VOID_SINGULARITY'])) &&
              (!('unlockedSkins' in data) || (data.unlockedSkins is list && data.unlockedSkins.size() >= 1 && data.unlockedSkins.size() <= 10)) &&
              (!('claimedQuests' in data) || (data.claimedQuests is list && data.claimedQuests.size() <= 20)) &&
+             (!('claimedPassTiers' in data) || (data.claimedPassTiers is list && data.claimedPassTiers.size() <= 30)) &&
              (!('loginRewardDay' in data) || (data.loginRewardDay is int && data.loginRewardDay >= 0 && data.loginRewardDay <= 7)) &&
              (!('lastLoginRewardDate' in data) || (data.lastLoginRewardDate is string && data.lastLoginRewardDate.size() <= 16)) &&
              (!('lastWheelSpinDate' in data) || (data.lastWheelSpinDate is string && data.lastWheelSpinDate.size() <= 16)) &&
+             (!('lastMysteryChestDate' in data) || (data.lastMysteryChestDate is string && data.lastMysteryChestDate.size() <= 16)) &&
+             (!('mysteryChestsOpened' in data) || (data.mysteryChestsOpened is int && data.mysteryChestsOpened >= 0 && data.mysteryChestsOpened <= 100000)) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidLeaderboardEntry(data, userId) {
+      return data.userId is string && data.userId == userId && data.userId.size() <= 128 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 50 &&
+             data.endlessHighScore is int && data.endlessHighScore >= 0 && data.endlessHighScore <= 100000000 &&
+             data.blitzHighScore is int && data.blitzHighScore >= 0 && data.blitzHighScore <= 100000000 &&
+             data.totalStars is int && data.totalStars >= 0 && data.totalStars <= 500 &&
+             data.pilotRankNumber is int && data.pilotRankNumber >= 1 && data.pilotRankNumber <= 6 &&
+             data.pilotRankTitle is string && data.pilotRankTitle.size() >= 1 && data.pilotRankTitle.size() <= 40 &&
+             data.equippedSkin is string && data.equippedSkin in ['CYAN_INTERCEPTOR', 'SOLAR_VALKYRIE', 'PLASMA_NOVA', 'VOID_SINGULARITY'] &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
@@ -61,13 +77,33 @@ service cloud.firestore {
     }
 
     function isValidGameRun(data) {
-      return data.mode is string && data.mode in ['SAGA', 'ENDLESS', 'DAILY'] &&
+      return data.mode is string && data.mode in ['SAGA', 'ENDLESS', 'DAILY', 'BLITZ'] &&
              data.levelNumber is int && data.levelNumber >= 0 && data.levelNumber <= 30 &&
              data.score is int && data.score >= 0 && data.score <= 100000000 &&
              data.maxCombo is int && data.maxCombo >= 0 && data.maxCombo <= 10000 &&
              data.bubblesPopped is int && data.bubblesPopped >= 0 && data.bubblesPopped <= 100000 &&
              data.starsEarned is int && data.starsEarned >= 0 && data.starsEarned <= 3 &&
              data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    match /leaderboard/{userId} {
+      allow get, list: if isSignedIn();
+
+      allow create, update: if isOwner(userId) &&
+                               isValidId(userId) &&
+                               incoming().keys().hasAll([
+                                 'userId', 'displayName', 'endlessHighScore', 'blitzHighScore',
+                                 'totalStars', 'pilotRankNumber', 'pilotRankTitle',
+                                 'equippedSkin', 'updatedAt'
+                               ]) &&
+                               incoming().keys().hasOnly([
+                                 'userId', 'displayName', 'endlessHighScore', 'blitzHighScore',
+                                 'totalStars', 'pilotRankNumber', 'pilotRankTitle',
+                                 'equippedSkin', 'updatedAt'
+                               ]) &&
+                               isValidLeaderboardEntry(incoming(), userId);
+
+      allow delete: if isOwner(userId) && isValidId(userId);
     }
 
     match /users/{userId} {
@@ -78,20 +114,22 @@ service cloud.firestore {
                        isValidId(userId) &&
                        incoming().keys().hasAll([
                          'userId', 'displayName', 'highestUnlockedLevel', 'totalStars',
-                         'endlessHighScore', 'totalBubblesPopped', 'starCoins',
+                         'endlessHighScore', 'blitzHighScore', 'totalBubblesPopped', 'starCoins',
                          'dailyStreak', 'lastDailyDay', 'bombBoosters',
                          'prismBoosters', 'laserBoosters', 'soundEnabled', 'hapticsEnabled',
-                         'equippedSkin', 'unlockedSkins', 'claimedQuests',
+                         'equippedSkin', 'unlockedSkins', 'claimedQuests', 'claimedPassTiers',
                          'loginRewardDay', 'lastLoginRewardDate', 'lastWheelSpinDate',
+                         'lastMysteryChestDate', 'mysteryChestsOpened',
                          'createdAt', 'updatedAt'
                        ]) &&
                        incoming().keys().hasOnly([
                          'userId', 'displayName', 'highestUnlockedLevel', 'totalStars',
-                         'endlessHighScore', 'totalBubblesPopped', 'starCoins',
+                         'endlessHighScore', 'blitzHighScore', 'totalBubblesPopped', 'starCoins',
                          'dailyStreak', 'lastDailyDay', 'bombBoosters',
                          'prismBoosters', 'laserBoosters', 'soundEnabled', 'hapticsEnabled',
-                         'equippedSkin', 'unlockedSkins', 'claimedQuests',
+                         'equippedSkin', 'unlockedSkins', 'claimedQuests', 'claimedPassTiers',
                          'loginRewardDay', 'lastLoginRewardDate', 'lastWheelSpinDate',
+                         'lastMysteryChestDate', 'mysteryChestsOpened',
                          'createdAt', 'updatedAt'
                        ]) &&
                        isValidPlayerProfile(incoming(), userId);
@@ -104,11 +142,12 @@ service cloud.firestore {
                        (
                          incoming().diff(existing()).affectedKeys().hasOnly([
                            'displayName', 'highestUnlockedLevel', 'totalStars',
-                           'endlessHighScore', 'totalBubblesPopped', 'starCoins',
+                           'endlessHighScore', 'blitzHighScore', 'totalBubblesPopped', 'starCoins',
                            'dailyStreak', 'lastDailyDay', 'bombBoosters',
                            'prismBoosters', 'laserBoosters', 'equippedSkin',
-                           'unlockedSkins', 'claimedQuests',
+                           'unlockedSkins', 'claimedQuests', 'claimedPassTiers',
                            'loginRewardDay', 'lastLoginRewardDate', 'lastWheelSpinDate',
+                           'lastMysteryChestDate', 'mysteryChestsOpened',
                            'updatedAt'
                          ]) ||
                          incoming().diff(existing()).affectedKeys().hasOnly([

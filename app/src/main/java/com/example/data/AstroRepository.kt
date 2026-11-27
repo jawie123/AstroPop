@@ -116,6 +116,65 @@ class AstroRepository(
         )
     }
 
+    fun observeLeaderboard(): Flow<List<LeaderboardEntry>> = flow {
+        requireUserId()
+        val query = db.collection("leaderboard")
+            .orderBy("endlessHighScore", Query.Direction.DESCENDING)
+            .limit(30)
+        emitAll(
+            query.snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        LeaderboardEntry::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    )
+                }
+                .catch { error ->
+                    val firestoreError = generateSequence(error) { it.cause }
+                        .filterIsInstance<FirebaseFirestoreException>()
+                        .firstOrNull()
+                    if (firestoreError == null && error is CancellationException) throw error
+                    val exceptionToLog = firestoreError ?: (error as? Exception)
+                    if (exceptionToLog != null && auth.currentUser != null) {
+                        handleFirestoreError(exceptionToLog, OperationType.LIST, "leaderboard")
+                    }
+                    throw error
+                }
+        )
+    }
+
+    private fun buildLeaderboardPayload(
+        uid: String,
+        displayName: String,
+        endlessHighScore: Long,
+        blitzHighScore: Long,
+        totalStars: Long,
+        totalBubblesPopped: Long,
+        equippedSkin: String
+    ): Map<String, Any> {
+        val rank = PlayerProfile(
+            userId = uid,
+            displayName = displayName,
+            endlessHighScore = endlessHighScore,
+            blitzHighScore = blitzHighScore,
+            totalStars = totalStars,
+            totalBubblesPopped = totalBubblesPopped,
+            equippedSkin = equippedSkin
+        ).pilotRank()
+        val safeSkin = CannonSkin.fromId(equippedSkin).name
+        return mapOf(
+            "userId" to uid,
+            "displayName" to displayName.trim().ifBlank { "StarCaptain" }.take(50),
+            "endlessHighScore" to endlessHighScore.coerceIn(0L, 100_000_000L),
+            "blitzHighScore" to blitzHighScore.coerceIn(0L, 100_000_000L),
+            "totalStars" to totalStars.coerceIn(0L, 500L),
+            "pilotRankNumber" to rank.rankNumber.toLong().coerceIn(1L, 6L),
+            "pilotRankTitle" to rank.title.take(40),
+            "equippedSkin" to safeSkin,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+    }
+
     suspend fun ensureProfile(userId: String, displayName: String): Result<Unit> {
         val path = "users/$userId"
         return try {
@@ -123,6 +182,7 @@ class AstroRepository(
             check(uid == userId) { "Signed-in user mismatch" }
             val docRef = db.collection("users").document(uid)
             val snap = docRef.get().await()
+            val lbRef = db.collection("leaderboard").document(uid)
             if (!snap.exists()) {
                 val safeName = displayName.trim().ifBlank { "StarCaptain" }.take(50)
                 val payload = mapOf(
@@ -131,6 +191,7 @@ class AstroRepository(
                     "highestUnlockedLevel" to 1L,
                     "totalStars" to 0L,
                     "endlessHighScore" to 0L,
+                    "blitzHighScore" to 0L,
                     "totalBubblesPopped" to 0L,
                     "starCoins" to 150L,
                     "dailyStreak" to 0L,
@@ -143,13 +204,42 @@ class AstroRepository(
                     "equippedSkin" to CannonSkin.CYAN_INTERCEPTOR.name,
                     "unlockedSkins" to listOf(CannonSkin.CYAN_INTERCEPTOR.name),
                     "claimedQuests" to emptyList<String>(),
+                    "claimedPassTiers" to emptyList<String>(),
                     "loginRewardDay" to 0L,
                     "lastLoginRewardDate" to "",
                     "lastWheelSpinDate" to "",
+                    "lastMysteryChestDate" to "",
+                    "mysteryChestsOpened" to 0L,
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
                 docRef.set(payload).await()
+                lbRef.set(
+                    buildLeaderboardPayload(
+                        uid = uid,
+                        displayName = safeName,
+                        endlessHighScore = 0L,
+                        blitzHighScore = 0L,
+                        totalStars = 0L,
+                        totalBubblesPopped = 0L,
+                        equippedSkin = CannonSkin.CYAN_INTERCEPTOR.name
+                    )
+                ).await()
+            } else {
+                val profile = snap.toObject(PlayerProfile::class.java)
+                if (profile != null) {
+                    lbRef.set(
+                        buildLeaderboardPayload(
+                            uid = uid,
+                            displayName = profile.displayName,
+                            endlessHighScore = profile.endlessHighScore,
+                            blitzHighScore = profile.blitzHighScore,
+                            totalStars = profile.totalStars,
+                            totalBubblesPopped = profile.totalBubblesPopped,
+                            equippedSkin = profile.equippedSkin
+                        )
+                    ).await()
+                }
             }
             Result.success(Unit)
         } catch (e: CancellationException) {
@@ -493,6 +583,109 @@ class AstroRepository(
         }
     }
 
+    suspend fun claimPassReward(
+        userId: String,
+        tier: SeasonPassTier,
+        isBonusTrack: Boolean
+    ): Result<Unit> {
+        val path = "users/$userId"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user mismatch" }
+            val docRef = db.collection("users").document(uid)
+            db.runTransaction { tx ->
+                val snap = tx.get(docRef)
+                val profile = snap.toObject(PlayerProfile::class.java)
+                    ?: throw IllegalStateException("Profile not found")
+                check(profile.pilotRank().xp >= tier.requiredXp) {
+                    "Reach ${tier.requiredXp} XP to unlock Tier ${tier.tier}!"
+                }
+                val rewardKey = if (isBonusTrack) tier.bonusKey else tier.freeKey
+                val rawClaimed = (snap.get("claimedPassTiers") as? List<*>)
+                    ?.mapNotNull { it as? String }
+                    ?: emptyList()
+                check(rewardKey !in rawClaimed) { "Tier ${tier.tier} reward already claimed!" }
+
+                val rewardCoins = if (isBonusTrack) tier.bonusCoins else tier.freeCoins
+                val rewardBooster = if (isBonusTrack) tier.bonusBooster else tier.freeBooster
+                val prevCoins = (snap.getLong("starCoins") ?: 0L).coerceAtLeast(0L)
+                val updates = mutableMapOf<String, Any>(
+                    "starCoins" to (prevCoins + rewardCoins).coerceAtMost(100_000_000L),
+                    "claimedPassTiers" to (rawClaimed + rewardKey).distinct().take(30),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                when (rewardBooster) {
+                    BoosterType.BOMB -> {
+                        val prev = (snap.getLong("bombBoosters") ?: 0L).coerceAtLeast(0L)
+                        updates["bombBoosters"] = (prev + 1L).coerceAtMost(999L)
+                    }
+                    BoosterType.PRISM -> {
+                        val prev = (snap.getLong("prismBoosters") ?: 0L).coerceAtLeast(0L)
+                        updates["prismBoosters"] = (prev + 1L).coerceAtMost(999L)
+                    }
+                    BoosterType.LASER -> {
+                        val prev = (snap.getLong("laserBoosters") ?: 0L).coerceAtLeast(0L)
+                        updates["laserBoosters"] = (prev + 1L).coerceAtMost(999L)
+                    }
+                    null -> Unit
+                }
+                tx.update(docRef, updates)
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun openMysteryChest(
+        userId: String,
+        reward: MysteryChestReward,
+        todayKey: String,
+        isFreeDaily: Boolean
+    ): Result<Unit> {
+        val safeDate = todayKey.take(16)
+        val path = "users/$userId"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user mismatch" }
+            val docRef = db.collection("users").document(uid)
+            db.runTransaction { tx ->
+                val snap = tx.get(docRef)
+                val lastDate = snap.getString("lastMysteryChestDate") ?: ""
+                if (isFreeDaily && lastDate == safeDate) {
+                    throw IllegalStateException("Today's free Mystery Chest already opened!")
+                }
+                val coins = (snap.getLong("starCoins") ?: 0L).coerceAtLeast(0L)
+                val bombs = (snap.getLong("bombBoosters") ?: 0L).coerceAtLeast(0L)
+                val prisms = (snap.getLong("prismBoosters") ?: 0L).coerceAtLeast(0L)
+                val lasers = (snap.getLong("laserBoosters") ?: 0L).coerceAtLeast(0L)
+                val opened = (snap.getLong("mysteryChestsOpened") ?: 0L).coerceAtLeast(0L)
+
+                val updates = mutableMapOf<String, Any>(
+                    "starCoins" to (coins + reward.coins).coerceAtMost(100_000_000L),
+                    "bombBoosters" to (bombs + reward.bombs).coerceAtMost(999L),
+                    "prismBoosters" to (prisms + reward.prisms).coerceAtMost(999L),
+                    "laserBoosters" to (lasers + reward.lasers).coerceAtMost(999L),
+                    "mysteryChestsOpened" to (opened + 1L).coerceAtMost(100_000L),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                if (isFreeDaily) {
+                    updates["lastMysteryChestDate"] = safeDate
+                }
+                tx.update(docRef, updates)
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun recordSagaLevelResult(
         userId: String,
         levelNumber: Int,
@@ -566,11 +759,17 @@ class AstroRepository(
                 val prevBombs = (userSnap.getLong("bombBoosters") ?: 2L).coerceAtLeast(0L)
                 val prevPrisms = (userSnap.getLong("prismBoosters") ?: 2L).coerceAtLeast(0L)
                 val prevLasers = (userSnap.getLong("laserBoosters") ?: 1L).coerceAtLeast(0L)
+                val prevEndless = (userSnap.getLong("endlessHighScore") ?: 0L).coerceAtLeast(0L)
+                val prevBlitz = (userSnap.getLong("blitzHighScore") ?: 0L).coerceAtLeast(0L)
+                val displayName = userSnap.getString("displayName") ?: "StarCaptain"
+                val equippedSkin = userSnap.getString("equippedSkin") ?: CannonSkin.CYAN_INTERCEPTOR.name
+                val nextTotalStars = (prevTotalStars + starDelta).coerceAtMost(500L)
+                val nextTotalPopped = (prevTotalPopped + safePopped).coerceAtMost(100_000_000L)
 
                 val userUpdate = mutableMapOf<String, Any>(
                     "highestUnlockedLevel" to nextUnlocked,
-                    "totalStars" to (prevTotalStars + starDelta).coerceAtMost(500L),
-                    "totalBubblesPopped" to (prevTotalPopped + safePopped).coerceAtMost(100_000_000L),
+                    "totalStars" to nextTotalStars,
+                    "totalBubblesPopped" to nextTotalPopped,
                     "starCoins" to (prevCoins + safeCoins).coerceAtMost(100_000_000L),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -581,6 +780,19 @@ class AstroRepository(
                     null -> Unit
                 }
                 tx.update(userRef, userUpdate)
+
+                tx.set(
+                    db.collection("leaderboard").document(uid),
+                    buildLeaderboardPayload(
+                        uid = uid,
+                        displayName = displayName,
+                        endlessHighScore = prevEndless,
+                        blitzHighScore = prevBlitz,
+                        totalStars = nextTotalStars,
+                        totalBubblesPopped = nextTotalPopped,
+                        equippedSkin = equippedSkin
+                    )
+                )
 
                 tx.set(
                     runRef,
@@ -626,16 +838,35 @@ class AstroRepository(
             db.runTransaction { tx ->
                 val userSnap = tx.get(userRef)
                 val prevBest = (userSnap.getLong("endlessHighScore") ?: 0L).coerceAtLeast(0L)
+                val prevBlitz = (userSnap.getLong("blitzHighScore") ?: 0L).coerceAtLeast(0L)
+                val prevStars = (userSnap.getLong("totalStars") ?: 0L).coerceAtLeast(0L)
                 val prevTotalPopped = (userSnap.getLong("totalBubblesPopped") ?: 0L).coerceAtLeast(0L)
                 val prevCoins = (userSnap.getLong("starCoins") ?: 150L).coerceAtLeast(0L)
+                val displayName = userSnap.getString("displayName") ?: "StarCaptain"
+                val equippedSkin = userSnap.getString("equippedSkin") ?: CannonSkin.CYAN_INTERCEPTOR.name
+                val nextEndless = maxOf(prevBest, safeScore)
+                val nextTotalPopped = (prevTotalPopped + safePopped).coerceAtMost(100_000_000L)
 
                 tx.update(
                     userRef,
                     mapOf(
-                        "endlessHighScore" to maxOf(prevBest, safeScore),
-                        "totalBubblesPopped" to (prevTotalPopped + safePopped).coerceAtMost(100_000_000L),
+                        "endlessHighScore" to nextEndless,
+                        "totalBubblesPopped" to nextTotalPopped,
                         "starCoins" to (prevCoins + safeCoins).coerceAtMost(100_000_000L),
                         "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+
+                tx.set(
+                    db.collection("leaderboard").document(uid),
+                    buildLeaderboardPayload(
+                        uid = uid,
+                        displayName = displayName,
+                        endlessHighScore = nextEndless,
+                        blitzHighScore = prevBlitz,
+                        totalStars = prevStars,
+                        totalBubblesPopped = nextTotalPopped,
+                        equippedSkin = equippedSkin
                     )
                 )
 
@@ -643,6 +874,81 @@ class AstroRepository(
                     runRef,
                     mapOf(
                         "mode" to GameMode.ENDLESS.name,
+                        "levelNumber" to 0L,
+                        "score" to safeScore,
+                        "maxCombo" to safeCombo,
+                        "bubblesPopped" to safePopped,
+                        "starsEarned" to 0L,
+                        "createdAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }.await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, userDocPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun recordBlitzResult(
+        userId: String,
+        score: Long,
+        maxCombo: Int,
+        bubblesPopped: Int,
+        coinsEarned: Long
+    ): Result<Unit> {
+        val safeScore = score.coerceIn(0L, 100_000_000L)
+        val safeCombo = maxCombo.coerceIn(0, 10_000).toLong()
+        val safePopped = bubblesPopped.coerceIn(0, 100_000).toLong()
+        val safeCoins = coinsEarned.coerceIn(0L, 50_000L)
+        val userDocPath = "users/$userId"
+        return try {
+            val uid = requireUserId()
+            check(uid == userId) { "Signed-in user mismatch" }
+            val userRef = db.collection("users").document(uid)
+            val runRef = userRef.collection("runs").document()
+
+            db.runTransaction { tx ->
+                val userSnap = tx.get(userRef)
+                val prevEndless = (userSnap.getLong("endlessHighScore") ?: 0L).coerceAtLeast(0L)
+                val prevBlitz = (userSnap.getLong("blitzHighScore") ?: 0L).coerceAtLeast(0L)
+                val prevStars = (userSnap.getLong("totalStars") ?: 0L).coerceAtLeast(0L)
+                val prevTotalPopped = (userSnap.getLong("totalBubblesPopped") ?: 0L).coerceAtLeast(0L)
+                val prevCoins = (userSnap.getLong("starCoins") ?: 150L).coerceAtLeast(0L)
+                val displayName = userSnap.getString("displayName") ?: "StarCaptain"
+                val equippedSkin = userSnap.getString("equippedSkin") ?: CannonSkin.CYAN_INTERCEPTOR.name
+                val nextBlitz = maxOf(prevBlitz, safeScore)
+                val nextTotalPopped = (prevTotalPopped + safePopped).coerceAtMost(100_000_000L)
+
+                tx.update(
+                    userRef,
+                    mapOf(
+                        "blitzHighScore" to nextBlitz,
+                        "totalBubblesPopped" to nextTotalPopped,
+                        "starCoins" to (prevCoins + safeCoins).coerceAtMost(100_000_000L),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+
+                tx.set(
+                    db.collection("leaderboard").document(uid),
+                    buildLeaderboardPayload(
+                        uid = uid,
+                        displayName = displayName,
+                        endlessHighScore = prevEndless,
+                        blitzHighScore = nextBlitz,
+                        totalStars = prevStars,
+                        totalBubblesPopped = nextTotalPopped,
+                        equippedSkin = equippedSkin
+                    )
+                )
+
+                tx.set(
+                    runRef,
+                    mapOf(
+                        "mode" to GameMode.BLITZ.name,
                         "levelNumber" to 0L,
                         "score" to safeScore,
                         "maxCombo" to safeCombo,

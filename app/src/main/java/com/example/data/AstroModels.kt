@@ -9,7 +9,8 @@ import com.google.firebase.firestore.ServerTimestamp
 enum class GameMode {
     SAGA,
     ENDLESS,
-    DAILY
+    DAILY,
+    BLITZ
 }
 
 enum class BoosterType(val label: String, val coinCost: Long) {
@@ -88,6 +89,66 @@ object DailySupplyCatalog {
     fun tierForDay(day: Int): DailySupplyTier = tiers[(day - 1).coerceIn(0, tiers.lastIndex)]
 }
 
+data class SeasonPassTier(
+    val tier: Int,
+    val title: String,
+    val requiredXp: Long,
+    val freeCoins: Long,
+    val freeBooster: BoosterType? = null,
+    val bonusCoins: Long,
+    val bonusBooster: BoosterType? = null
+) {
+    val freeKey: String get() = "free_$tier"
+    val bonusKey: String get() = "bonus_$tier"
+}
+
+object SeasonPassCatalog {
+    val tiers: List<SeasonPassTier> = listOf(
+        SeasonPassTier(1, "Cadet Launch", 100L, freeCoins = 40L, bonusCoins = 80L),
+        SeasonPassTier(2, "Orbital Spark", 350L, freeCoins = 50L, freeBooster = BoosterType.BOMB, bonusCoins = 75L, bonusBooster = BoosterType.PRISM),
+        SeasonPassTier(3, "Nebula Scout", 700L, freeCoins = 70L, bonusCoins = 110L),
+        SeasonPassTier(4, "Ion Cruiser", 1200L, freeCoins = 45L, freeBooster = BoosterType.PRISM, bonusCoins = 90L, bonusBooster = BoosterType.BOMB),
+        SeasonPassTier(5, "Comet Ace", 1900L, freeCoins = 95L, bonusCoins = 140L),
+        SeasonPassTier(6, "Starbreaker", 2800L, freeCoins = 60L, freeBooster = BoosterType.LASER, bonusCoins = 120L, bonusBooster = BoosterType.LASER),
+        SeasonPassTier(7, "Void Runner", 3900L, freeCoins = 120L, bonusCoins = 175L),
+        SeasonPassTier(8, "Solar Vanguard", 5200L, freeCoins = 75L, freeBooster = BoosterType.BOMB, bonusCoins = 150L, bonusBooster = BoosterType.PRISM),
+        SeasonPassTier(9, "Pulsar Knight", 6800L, freeCoins = 150L, bonusCoins = 210L),
+        SeasonPassTier(10, "Supernova Core", 8500L, freeCoins = 90L, freeBooster = BoosterType.PRISM, bonusCoins = 180L, bonusBooster = BoosterType.LASER),
+        SeasonPassTier(11, "Singularity Ace", 10200L, freeCoins = 180L, bonusCoins = 260L),
+        SeasonPassTier(12, "Galactic Crown", 12000L, freeCoins = 250L, freeBooster = BoosterType.LASER, bonusCoins = 350L, bonusBooster = BoosterType.BOMB)
+    )
+}
+
+enum class MysteryChestReward(
+    val title: String,
+    val description: String,
+    val coins: Long,
+    val bombs: Long = 0L,
+    val prisms: Long = 0L,
+    val lasers: Long = 0L
+) {
+    STARLIGHT_POUCH("Starlight Pouch", "+75 Star Coins", coins = 75L),
+    NOVA_CRATE("Nova Bomb Crate", "+35 Coins & +1 Nova Bomb", coins = 35L, bombs = 1L),
+    PRISM_CACHE("Prism Orb Cache", "+40 Coins & +1 Prism Orb", coins = 40L, prisms = 1L),
+    LASER_POD("Star Laser Pod", "+30 Coins & +1 Star Laser", coins = 30L, lasers = 1L),
+    COMET_HOARD("Comet Coin Hoard", "+150 Star Coins!", coins = 150L),
+    SUPERNOVA_JACKPOT("Supernova Jackpot!", "+220 Coins & +1 All Boosters!", coins = 220L, bombs = 1L, prisms = 1L, lasers = 1L);
+
+    companion object {
+        fun rollRandom(): MysteryChestReward {
+            val roll = (0 until 100).random()
+            return when {
+                roll < 24 -> STARLIGHT_POUCH
+                roll < 44 -> NOVA_CRATE
+                roll < 64 -> PRISM_CACHE
+                roll < 80 -> LASER_POD
+                roll < 94 -> COMET_HOARD
+                else -> SUPERNOVA_JACKPOT
+            }
+        }
+    }
+}
+
 enum class WheelPrize(
     val shortLabel: String,
     val fullLabel: String,
@@ -127,6 +188,7 @@ data class PlayerProfile(
     val highestUnlockedLevel: Long = 1L,
     val totalStars: Long = 0L,
     val endlessHighScore: Long = 0L,
+    val blitzHighScore: Long = 0L,
     val totalBubblesPopped: Long = 0L,
     val starCoins: Long = 150L,
     val dailyStreak: Long = 0L,
@@ -139,16 +201,19 @@ data class PlayerProfile(
     val equippedSkin: String = CannonSkin.CYAN_INTERCEPTOR.name,
     val unlockedSkins: List<String> = listOf(CannonSkin.CYAN_INTERCEPTOR.name),
     val claimedQuests: List<String> = emptyList(),
+    val claimedPassTiers: List<String> = emptyList(),
     val loginRewardDay: Long = 0L,
     val lastLoginRewardDate: String = "",
     val lastWheelSpinDate: String = "",
+    val lastMysteryChestDate: String = "",
+    val mysteryChestsOpened: Long = 0L,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
     fun resolvedSkin(): CannonSkin = CannonSkin.fromId(equippedSkin)
 
     fun pilotRank(): PilotRankInfo {
-        val xp = totalBubblesPopped * 2L + totalStars * 120L + endlessHighScore / 15L
+        val xp = totalBubblesPopped * 2L + totalStars * 120L + endlessHighScore / 15L + blitzHighScore / 15L
         val thresholds = listOf(
             0L to "Star Cadet",
             500L to "Orbit Striker",
@@ -172,7 +237,36 @@ data class PlayerProfile(
             progress = progress
         )
     }
+
+    fun toLeaderboardEntry(): LeaderboardEntry {
+        val rank = pilotRank()
+        return LeaderboardEntry(
+            userId = userId,
+            displayName = displayName,
+            endlessHighScore = endlessHighScore,
+            blitzHighScore = blitzHighScore,
+            totalStars = totalStars,
+            pilotRankNumber = rank.rankNumber.toLong(),
+            pilotRankTitle = rank.title,
+            equippedSkin = resolvedSkin().name
+        )
+    }
 }
+
+@Keep
+@IgnoreExtraProperties
+data class LeaderboardEntry(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val displayName: String = "StarCaptain",
+    val endlessHighScore: Long = 0L,
+    val blitzHighScore: Long = 0L,
+    val totalStars: Long = 0L,
+    val pilotRankNumber: Long = 1L,
+    val pilotRankTitle: String = "Star Cadet",
+    val equippedSkin: String = CannonSkin.CYAN_INTERCEPTOR.name,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
 
 @Keep
 @IgnoreExtraProperties

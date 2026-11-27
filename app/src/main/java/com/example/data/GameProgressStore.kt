@@ -14,6 +14,7 @@ interface GameProgressStore {
     fun observeProfile(): Flow<PlayerProfile?>
     fun observeLevels(): Flow<List<LevelProgress>>
     fun observeRecentRuns(): Flow<List<GameRun>>
+    fun observeLeaderboard(): Flow<List<LeaderboardEntry>>
     suspend fun ensureProfile(displayName: String): Result<Unit>
     suspend fun updatePreferences(soundEnabled: Boolean, hapticsEnabled: Boolean): Result<Unit>
     suspend fun consumeBooster(booster: BoosterType): Result<Unit>
@@ -24,6 +25,8 @@ interface GameProgressStore {
     suspend fun claimQuest(quest: CosmicQuest): Result<Unit>
     suspend fun claimDailySupply(todayKey: String): Result<DailySupplyTier>
     suspend fun claimWheelPrize(prize: WheelPrize, todayKey: String, isFreeDaily: Boolean): Result<Unit>
+    suspend fun claimPassReward(tier: SeasonPassTier, isBonusTrack: Boolean): Result<Unit>
+    suspend fun openMysteryChest(reward: MysteryChestReward, todayKey: String, isFreeDaily: Boolean): Result<Unit>
     suspend fun recordSagaLevelResult(
         levelNumber: Int,
         score: Long,
@@ -35,6 +38,12 @@ interface GameProgressStore {
         coinsEarned: Long
     ): Result<Unit>
     suspend fun recordEndlessResult(
+        score: Long,
+        maxCombo: Int,
+        bubblesPopped: Int,
+        coinsEarned: Long
+    ): Result<Unit>
+    suspend fun recordBlitzResult(
         score: Long,
         maxCombo: Int,
         bubblesPopped: Int,
@@ -63,6 +72,8 @@ class FirestoreProgressStore(
     override fun observeLevels(): Flow<List<LevelProgress>> = repository.observeLevels(userId)
 
     override fun observeRecentRuns(): Flow<List<GameRun>> = repository.observeRecentRuns(userId)
+
+    override fun observeLeaderboard(): Flow<List<LeaderboardEntry>> = repository.observeLeaderboard()
 
     override suspend fun ensureProfile(displayName: String): Result<Unit> =
         repository.ensureProfile(userId, displayName)
@@ -94,6 +105,15 @@ class FirestoreProgressStore(
     override suspend fun claimWheelPrize(prize: WheelPrize, todayKey: String, isFreeDaily: Boolean): Result<Unit> =
         repository.claimWheelPrize(userId, prize, todayKey, isFreeDaily)
 
+    override suspend fun claimPassReward(tier: SeasonPassTier, isBonusTrack: Boolean): Result<Unit> =
+        repository.claimPassReward(userId, tier, isBonusTrack)
+
+    override suspend fun openMysteryChest(
+        reward: MysteryChestReward,
+        todayKey: String,
+        isFreeDaily: Boolean
+    ): Result<Unit> = repository.openMysteryChest(userId, reward, todayKey, isFreeDaily)
+
     override suspend fun recordSagaLevelResult(
         levelNumber: Int,
         score: Long,
@@ -121,6 +141,19 @@ class FirestoreProgressStore(
         bubblesPopped: Int,
         coinsEarned: Long
     ): Result<Unit> = repository.recordEndlessResult(
+        userId = userId,
+        score = score,
+        maxCombo = maxCombo,
+        bubblesPopped = bubblesPopped,
+        coinsEarned = coinsEarned
+    )
+
+    override suspend fun recordBlitzResult(
+        score: Long,
+        maxCombo: Int,
+        bubblesPopped: Int,
+        coinsEarned: Long
+    ): Result<Unit> = repository.recordBlitzResult(
         userId = userId,
         score = score,
         maxCombo = maxCombo,
@@ -165,6 +198,13 @@ class GuestProgressStore(context: Context) : GameProgressStore {
     override fun observeLevels(): Flow<List<LevelProgress>> = levelsFlow.asStateFlow()
 
     override fun observeRecentRuns(): Flow<List<GameRun>> = runsFlow.asStateFlow()
+
+    override fun observeLeaderboard(): Flow<List<LeaderboardEntry>> =
+        kotlinx.coroutines.flow.flow {
+            profileFlow.collect { profile ->
+                emit(listOf((profile ?: loadProfile()).toLeaderboardEntry()))
+            }
+        }
 
     override suspend fun ensureProfile(displayName: String): Result<Unit> {
         if (!prefs.getBoolean(KEY_INITIALIZED, false)) {
@@ -322,6 +362,54 @@ class GuestProgressStore(context: Context) : GameProgressStore {
         return Result.success(Unit)
     }
 
+    override suspend fun claimPassReward(tier: SeasonPassTier, isBonusTrack: Boolean): Result<Unit> {
+        val current = profileFlow.value ?: loadProfile()
+        val xp = current.pilotRank().xp
+        if (xp < tier.requiredXp) {
+            return Result.failure(IllegalStateException("Reach ${tier.requiredXp} XP to unlock Tier ${tier.tier}!"))
+        }
+        val rewardKey = if (isBonusTrack) tier.bonusKey else tier.freeKey
+        if (rewardKey in current.claimedPassTiers) {
+            return Result.failure(IllegalStateException("Tier ${tier.tier} reward already claimed!"))
+        }
+        val coins = if (isBonusTrack) tier.bonusCoins else tier.freeCoins
+        val booster = if (isBonusTrack) tier.bonusBooster else tier.freeBooster
+        var updated = current.copy(
+            starCoins = current.starCoins + coins,
+            claimedPassTiers = (current.claimedPassTiers + rewardKey).distinct().take(30)
+        )
+        updated = when (booster) {
+            BoosterType.BOMB -> updated.copy(bombBoosters = (updated.bombBoosters + 1L).coerceAtMost(999L))
+            BoosterType.PRISM -> updated.copy(prismBoosters = (updated.prismBoosters + 1L).coerceAtMost(999L))
+            BoosterType.LASER -> updated.copy(laserBoosters = (updated.laserBoosters + 1L).coerceAtMost(999L))
+            null -> updated
+        }
+        saveProfile(updated)
+        return Result.success(Unit)
+    }
+
+    override suspend fun openMysteryChest(
+        reward: MysteryChestReward,
+        todayKey: String,
+        isFreeDaily: Boolean
+    ): Result<Unit> {
+        val current = profileFlow.value ?: loadProfile()
+        if (isFreeDaily && current.lastMysteryChestDate == todayKey) {
+            return Result.failure(IllegalStateException("Today's free Mystery Chest already opened!"))
+        }
+        saveProfile(
+            current.copy(
+                starCoins = current.starCoins + reward.coins,
+                bombBoosters = (current.bombBoosters + reward.bombs).coerceAtMost(999L),
+                prismBoosters = (current.prismBoosters + reward.prisms).coerceAtMost(999L),
+                laserBoosters = (current.laserBoosters + reward.lasers).coerceAtMost(999L),
+                lastMysteryChestDate = if (isFreeDaily) todayKey else current.lastMysteryChestDate,
+                mysteryChestsOpened = (current.mysteryChestsOpened + 1L).coerceAtMost(100_000L)
+            )
+        )
+        return Result.success(Unit)
+    }
+
     override suspend fun recordSagaLevelResult(
         levelNumber: Int,
         score: Long,
@@ -418,6 +506,35 @@ class GuestProgressStore(context: Context) : GameProgressStore {
         return Result.success(Unit)
     }
 
+    override suspend fun recordBlitzResult(
+        score: Long,
+        maxCombo: Int,
+        bubblesPopped: Int,
+        coinsEarned: Long
+    ): Result<Unit> {
+        val safeScore = score.coerceAtLeast(0L)
+        val currentProfile = profileFlow.value ?: loadProfile()
+        saveProfile(
+            currentProfile.copy(
+                blitzHighScore = maxOf(currentProfile.blitzHighScore, safeScore),
+                totalBubblesPopped = currentProfile.totalBubblesPopped + bubblesPopped.coerceAtLeast(0).toLong(),
+                starCoins = currentProfile.starCoins + coinsEarned.coerceAtLeast(0L)
+            )
+        )
+        prependRun(
+            GameRun(
+                id = UUID.randomUUID().toString(),
+                mode = GameMode.BLITZ.name,
+                levelNumber = 0L,
+                score = safeScore,
+                maxCombo = maxCombo.coerceAtLeast(0).toLong(),
+                bubblesPopped = bubblesPopped.coerceAtLeast(0).toLong(),
+                starsEarned = 0L
+            )
+        )
+        return Result.success(Unit)
+    }
+
     override suspend fun recordDailyChallengeResult(
         dayKey: String,
         previousDayKey: String,
@@ -465,6 +582,7 @@ class GuestProgressStore(context: Context) : GameProgressStore {
             highestUnlockedLevel = prefs.getLong(KEY_HIGHEST_LEVEL, 1L).coerceIn(1L, 30L),
             totalStars = prefs.getLong(KEY_TOTAL_STARS, 0L).coerceAtLeast(0L),
             endlessHighScore = prefs.getLong(KEY_ENDLESS_HIGH, 0L).coerceAtLeast(0L),
+            blitzHighScore = prefs.getLong(KEY_BLITZ_HIGH, 0L).coerceAtLeast(0L),
             totalBubblesPopped = prefs.getLong(KEY_TOTAL_POPPED, 0L).coerceAtLeast(0L),
             starCoins = prefs.getLong(KEY_STAR_COINS, 150L).coerceAtLeast(0L),
             dailyStreak = prefs.getLong(KEY_DAILY_STREAK, 0L).coerceAtLeast(0L),
@@ -481,9 +599,12 @@ class GuestProgressStore(context: Context) : GameProgressStore {
                 listOf(CannonSkin.CYAN_INTERCEPTOR.name)
             ),
             claimedQuests = decodeStringList(prefs.getString(KEY_CLAIMED_QUESTS, null), emptyList()),
+            claimedPassTiers = decodeStringList(prefs.getString(KEY_CLAIMED_PASS_TIERS, null), emptyList()),
             loginRewardDay = prefs.getLong(KEY_LOGIN_REWARD_DAY, 0L).coerceIn(0L, 7L),
             lastLoginRewardDate = prefs.getString(KEY_LAST_LOGIN_REWARD, "") ?: "",
-            lastWheelSpinDate = prefs.getString(KEY_LAST_WHEEL_SPIN, "") ?: ""
+            lastWheelSpinDate = prefs.getString(KEY_LAST_WHEEL_SPIN, "") ?: "",
+            lastMysteryChestDate = prefs.getString(KEY_LAST_MYSTERY_CHEST, "") ?: "",
+            mysteryChestsOpened = prefs.getLong(KEY_MYSTERY_CHESTS_OPENED, 0L).coerceAtLeast(0L)
         )
     }
 
@@ -494,6 +615,7 @@ class GuestProgressStore(context: Context) : GameProgressStore {
             .putLong(KEY_HIGHEST_LEVEL, profile.highestUnlockedLevel)
             .putLong(KEY_TOTAL_STARS, profile.totalStars)
             .putLong(KEY_ENDLESS_HIGH, profile.endlessHighScore)
+            .putLong(KEY_BLITZ_HIGH, profile.blitzHighScore)
             .putLong(KEY_TOTAL_POPPED, profile.totalBubblesPopped)
             .putLong(KEY_STAR_COINS, profile.starCoins)
             .putLong(KEY_DAILY_STREAK, profile.dailyStreak)
@@ -506,9 +628,12 @@ class GuestProgressStore(context: Context) : GameProgressStore {
             .putString(KEY_EQUIPPED_SKIN, profile.equippedSkin)
             .putString(KEY_UNLOCKED_SKINS, JSONArray(profile.unlockedSkins).toString())
             .putString(KEY_CLAIMED_QUESTS, JSONArray(profile.claimedQuests).toString())
+            .putString(KEY_CLAIMED_PASS_TIERS, JSONArray(profile.claimedPassTiers).toString())
             .putLong(KEY_LOGIN_REWARD_DAY, profile.loginRewardDay)
             .putString(KEY_LAST_LOGIN_REWARD, profile.lastLoginRewardDate)
             .putString(KEY_LAST_WHEEL_SPIN, profile.lastWheelSpinDate)
+            .putString(KEY_LAST_MYSTERY_CHEST, profile.lastMysteryChestDate)
+            .putLong(KEY_MYSTERY_CHESTS_OPENED, profile.mysteryChestsOpened)
             .apply()
         profileFlow.value = profile
     }
@@ -621,6 +746,7 @@ class GuestProgressStore(context: Context) : GameProgressStore {
         const val KEY_HIGHEST_LEVEL = "highest_level"
         const val KEY_TOTAL_STARS = "total_stars"
         const val KEY_ENDLESS_HIGH = "endless_high"
+        const val KEY_BLITZ_HIGH = "blitz_high"
         const val KEY_TOTAL_POPPED = "total_popped"
         const val KEY_STAR_COINS = "star_coins"
         const val KEY_DAILY_STREAK = "daily_streak"
@@ -633,9 +759,12 @@ class GuestProgressStore(context: Context) : GameProgressStore {
         const val KEY_EQUIPPED_SKIN = "equipped_skin"
         const val KEY_UNLOCKED_SKINS = "unlocked_skins"
         const val KEY_CLAIMED_QUESTS = "claimed_quests"
+        const val KEY_CLAIMED_PASS_TIERS = "claimed_pass_tiers"
         const val KEY_LOGIN_REWARD_DAY = "login_reward_day"
         const val KEY_LAST_LOGIN_REWARD = "last_login_reward"
         const val KEY_LAST_WHEEL_SPIN = "last_wheel_spin"
+        const val KEY_LAST_MYSTERY_CHEST = "last_mystery_chest"
+        const val KEY_MYSTERY_CHESTS_OPENED = "mystery_chests_opened"
         const val KEY_LEVELS_JSON = "levels_json"
         const val KEY_RUNS_JSON = "runs_json"
     }

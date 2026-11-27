@@ -41,13 +41,16 @@ import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Flare
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import android.content.Intent
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Toll
 import androidx.compose.material.icons.rounded.Whatshot
+import androidx.compose.material.icons.rounded.WorkspacePremium
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -81,6 +84,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
@@ -242,6 +246,7 @@ fun GameScreen(
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     val goalText = when {
+                        state.mode == GameMode.BLITZ -> "Wave ${state.endlessWave + 1} • Drop ${state.endlessShotsUntilDescent}"
                         state.mode == GameMode.ENDLESS -> "Drop in ${state.endlessShotsUntilDescent}"
                         state.levelSpec.goal == LevelGoal.RESCUE_STARS -> "Stars left: ${state.starsRemaining}"
                         else -> "Clear Board"
@@ -859,6 +864,7 @@ private fun GameHudBar(
             Column {
                 val stageTitle = when (state.mode) {
                     GameMode.ENDLESS -> "Endless Panic"
+                    GameMode.BLITZ -> "Cosmic Blitz"
                     GameMode.DAILY -> "Daily Nebula"
                     GameMode.SAGA -> "Stage ${state.levelSpec.levelNumber}"
                 }
@@ -897,7 +903,32 @@ private fun GameHudBar(
                 }
             }
 
-            if (state.mode == GameMode.SAGA || state.mode == GameMode.DAILY) {
+            if (state.mode == GameMode.BLITZ) {
+                val mins = state.blitzSecondsRemaining / 60
+                val secs = state.blitzSecondsRemaining % 60
+                val isLowTime = state.blitzSecondsRemaining <= 15
+                Surface(
+                    color = if (isLowTime) DangerCrimson.copy(alpha = 0.25f) else NebulaSurface,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.border(
+                        1.dp,
+                        if (isLowTime) DangerCrimson else AstroCyan,
+                        RoundedCornerShape(14.dp)
+                    )
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Text("TIME", style = MaterialTheme.typography.labelSmall, color = StarlightMuted)
+                        Text(
+                            text = "%d:%02d".format(mins, secs),
+                            style = MaterialTheme.typography.titleLarge,
+                            color = if (isLowTime) DangerCrimson else AstroCyan
+                        )
+                    }
+                }
+            } else if (state.mode == GameMode.SAGA || state.mode == GameMode.DAILY) {
                 Surface(
                     color = if (state.movesRemaining <= 5) DangerCrimson.copy(alpha = 0.25f) else NebulaSurface,
                     shape = RoundedCornerShape(14.dp),
@@ -1145,10 +1176,15 @@ private fun GameOverlayModal(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
+                    val context = LocalContext.current
                     val headline = when (state.status) {
                         GameStatus.PAUSED -> "Mission Paused"
-                        GameStatus.WON -> if (state.mode == GameMode.DAILY) "Daily Cleared!" else "Stage Cleared!"
-                        GameStatus.LOST -> if (state.mode == GameMode.ENDLESS) "Nebula Overrun!" else "Out of Shots!"
+                        GameStatus.WON -> when (state.mode) {
+                            GameMode.DAILY -> "Daily Cleared!"
+                            GameMode.BLITZ -> "Blitz Complete!"
+                            else -> "Stage Cleared!"
+                        }
+                        GameStatus.LOST -> if (state.mode == GameMode.ENDLESS || state.mode == GameMode.BLITZ) "Nebula Overrun!" else "Out of Shots!"
                         GameStatus.PLAYING -> ""
                     }
                     Text(
@@ -1162,7 +1198,27 @@ private fun GameOverlayModal(
                         textAlign = TextAlign.Center
                     )
 
-                    if (state.status == GameStatus.WON && state.mode != GameMode.ENDLESS) {
+                    if (state.status == GameStatus.WON && state.mode == GameMode.BLITZ) {
+                        val (medalLabel, medalColor) = when {
+                            state.score >= 8000L -> "GOLD ACE MEDAL" to AstroGold
+                            state.score >= 4500L -> "SILVER PILOT MEDAL" to Color(0xFFE2E8F0)
+                            else -> "BRONZE STRIKER MEDAL" to Color(0xFFF59E0B)
+                        }
+                        Surface(
+                            color = medalColor.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.border(1.5.dp, medalColor, RoundedCornerShape(14.dp))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Rounded.WorkspacePremium, contentDescription = null, tint = medalColor)
+                                Text(medalLabel, style = MaterialTheme.typography.labelLarge, color = medalColor)
+                            }
+                        }
+                    } else if (state.status == GameStatus.WON && state.mode != GameMode.ENDLESS) {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             for (i in 1..3) {
                                 Icon(
@@ -1314,6 +1370,38 @@ private fun GameOverlayModal(
                         Icon(Icons.Rounded.Refresh, contentDescription = null)
                         Spacer(modifier = Modifier.size(6.dp))
                         Text("Play Again", style = MaterialTheme.typography.titleMedium)
+                    }
+
+                    if (state.status == GameStatus.WON ||
+                        (state.status == GameStatus.LOST && (state.mode == GameMode.ENDLESS || state.mode == GameMode.BLITZ))
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val modeName = when (state.mode) {
+                                    GameMode.SAGA -> "Stage ${state.levelSpec.levelNumber} (${state.levelSpec.title})"
+                                    GameMode.DAILY -> "Daily Nebula"
+                                    GameMode.ENDLESS -> "Endless Panic"
+                                    GameMode.BLITZ -> "Cosmic Blitz (2:00)"
+                                }
+                                val shareBody = "I just scored ${state.score} pts (${state.maxCombo}x max combo) in AstroPop — $modeName! Can you beat my cosmic rank? https://play.google.com/store/apps/details?id=com.aistudio.astropop.qvnrtx"
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "AstroPop Cosmic Score!")
+                                    putExtra(Intent.EXTRA_TEXT, shareBody)
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share AstroPop Score"))
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = AstroCyan),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("share_score_button")
+                        ) {
+                            Icon(Icons.Rounded.Share, contentDescription = null)
+                            Spacer(modifier = Modifier.size(6.dp))
+                            Text("Share Score Card", style = MaterialTheme.typography.labelLarge)
+                        }
                     }
 
                     OutlinedButton(
@@ -1519,6 +1607,34 @@ private fun DrawScope.drawCosmicBubble(
                     end = center + Offset(radius * 0.35f, radius * 0.4f),
                     strokeWidth = 2.2f
                 )
+            }
+
+            if (kind == TileKind.SHIELDED) {
+                drawCircle(
+                    color = Color(0xFF334155),
+                    radius = radius * 0.96f,
+                    center = center,
+                    style = Stroke(width = 6.2f)
+                )
+                drawCircle(
+                    color = Color(0xFFE2E8F0),
+                    radius = radius * 0.92f,
+                    center = center,
+                    style = Stroke(width = 2.6f)
+                )
+                val rivetDist = radius * 0.72f
+                listOf(
+                    Offset(-rivetDist, 0f),
+                    Offset(rivetDist, 0f),
+                    Offset(0f, -rivetDist),
+                    Offset(0f, rivetDist)
+                ).forEach { offset ->
+                    drawCircle(
+                        color = Color(0xFFF8FAFC),
+                        radius = radius * 0.11f,
+                        center = center + offset
+                    )
+                }
             }
         }
     }

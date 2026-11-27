@@ -8,8 +8,11 @@ import com.example.data.CannonSkin
 import com.example.data.CosmicQuest
 import com.example.data.GameProgressStore
 import com.example.data.GameRun
+import com.example.data.LeaderboardEntry
 import com.example.data.LevelProgress
+import com.example.data.MysteryChestReward
 import com.example.data.PlayerProfile
+import com.example.data.SeasonPassTier
 import com.example.data.UiState
 import com.example.data.WheelPrize
 import com.google.firebase.firestore.FirebaseFirestoreException
@@ -75,6 +78,23 @@ class ProfileViewModel(
             val rootError = firestoreError ?: error
             Log.w(TAG, "Error observing recent runs", rootError)
             emit(UiState.Error(rootError.message ?: "Failed to load recent runs"))
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000L),
+            initialValue = UiState.Loading
+        )
+
+    val leaderboardState: StateFlow<UiState<List<LeaderboardEntry>>> = store.observeLeaderboard()
+        .map<List<LeaderboardEntry>, UiState<List<LeaderboardEntry>>> { UiState.Success(it) }
+        .catch { error ->
+            val firestoreError = generateSequence(error) { it.cause }
+                .filterIsInstance<FirebaseFirestoreException>()
+                .firstOrNull()
+            if (firestoreError == null && error is CancellationException) throw error
+            val rootError = firestoreError ?: error
+            Log.w(TAG, "Error observing leaderboard", rootError)
+            emit(UiState.Error(rootError.message ?: "Failed to load galactic leaderboard"))
         }
         .stateIn(
             scope = viewModelScope,
@@ -156,6 +176,37 @@ class ProfileViewModel(
                 "Lucky Wheel: Won ${prize.fullLabel}!"
             } else {
                 result.exceptionOrNull()?.localizedMessage ?: "Unable to claim wheel prize"
+            }
+        }
+    }
+
+    fun claimPassReward(tier: SeasonPassTier, isBonusTrack: Boolean) {
+        viewModelScope.launch {
+            val result = store.claimPassReward(tier, isBonusTrack)
+            _shopFeedback.value = if (result.isSuccess) {
+                val coins = if (isBonusTrack) tier.bonusCoins else tier.freeCoins
+                val booster = if (isBonusTrack) tier.bonusBooster else tier.freeBooster
+                val boosterStr = booster?.let { " + 1 ${it.label}" } ?: ""
+                "Season Pass Tier ${tier.tier}: +${coins}c$boosterStr!"
+            } else {
+                result.exceptionOrNull()?.localizedMessage ?: "Season Pass tier not unlocked yet"
+            }
+        }
+    }
+
+    fun openMysteryChest(
+        todayKey: String,
+        isFreeDaily: Boolean,
+        onOpened: (MysteryChestReward) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val rolled = MysteryChestReward.rollRandom()
+            val result = store.openMysteryChest(rolled, todayKey, isFreeDaily)
+            if (result.isSuccess) {
+                _shopFeedback.value = "${rolled.title}: ${rolled.description}!"
+                onOpened(rolled)
+            } else {
+                _shopFeedback.value = result.exceptionOrNull()?.localizedMessage ?: "Unable to open Mystery Chest"
             }
         }
     }

@@ -2,7 +2,7 @@
   "entities": {
     "PlayerProfile": {
       "title": "PlayerProfile",
-      "description": "Authenticated AstroPop player progression, booster inventory, Star Coins, daily streak, and preferences.",
+      "description": "Authenticated AstroPop player progression, booster inventory, Star Coins, daily streak, season pass, and preferences.",
       "type": "object",
       "properties": {
         "userId": { "type": "string", "description": "Firebase Auth UID of the player." },
@@ -10,6 +10,7 @@
         "highestUnlockedLevel": { "type": "integer", "description": "Highest unlocked saga level (1-30)." },
         "totalStars": { "type": "integer", "description": "Total stars earned across saga levels." },
         "endlessHighScore": { "type": "integer", "description": "Best score in Endless Panic mode." },
+        "blitzHighScore": { "type": "integer", "description": "Best score in Cosmic Blitz 2-minute mode." },
         "totalBubblesPopped": { "type": "integer", "description": "Lifetime bubbles popped." },
         "starCoins": { "type": "integer", "description": "In-game Star Coins earned for boosters and extra shots." },
         "dailyStreak": { "type": "integer", "description": "Consecutive Daily Cosmic Challenge streak count." },
@@ -22,9 +23,12 @@
         "equippedSkin": { "type": "string", "description": "Equipped Star-Cannon cosmetic skin ID." },
         "unlockedSkins": { "type": "array", "items": { "type": "string" }, "description": "Unlocked Star-Cannon skin IDs." },
         "claimedQuests": { "type": "array", "items": { "type": "string" }, "description": "Claimed Cosmic Quest milestone IDs." },
+        "claimedPassTiers": { "type": "array", "items": { "type": "string" }, "description": "Claimed Cosmic Season Pass reward IDs." },
         "loginRewardDay": { "type": "integer", "description": "Current 7-day daily supply streak count (0-7)." },
         "lastLoginRewardDate": { "type": "string", "description": "ISO date string (YYYY-MM-DD) of last claimed daily supply." },
         "lastWheelSpinDate": { "type": "string", "description": "ISO date string (YYYY-MM-DD) of last free Lucky Wheel spin." },
+        "lastMysteryChestDate": { "type": "string", "description": "ISO date string (YYYY-MM-DD) of last free Mystery Chest." },
+        "mysteryChestsOpened": { "type": "integer", "description": "Lifetime Mystery Star Chests opened." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp when profile was created." },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp of last update." }
       },
@@ -34,6 +38,7 @@
         "highestUnlockedLevel",
         "totalStars",
         "endlessHighScore",
+        "blitzHighScore",
         "totalBubblesPopped",
         "starCoins",
         "dailyStreak",
@@ -46,10 +51,40 @@
         "equippedSkin",
         "unlockedSkins",
         "claimedQuests",
+        "claimedPassTiers",
         "loginRewardDay",
         "lastLoginRewardDate",
         "lastWheelSpinDate",
+        "lastMysteryChestDate",
+        "mysteryChestsOpened",
         "createdAt",
+        "updatedAt"
+      ]
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Publicly readable (to signed-in pilots) global ranking snapshot for a player.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID of the ranked pilot." },
+        "displayName": { "type": "string", "description": "Pilot display name." },
+        "endlessHighScore": { "type": "integer", "description": "Best Endless Panic score." },
+        "blitzHighScore": { "type": "integer", "description": "Best Cosmic Blitz score." },
+        "totalStars": { "type": "integer", "description": "Total Saga stars earned." },
+        "pilotRankNumber": { "type": "integer", "description": "Pilot rank tier (1-6)." },
+        "pilotRankTitle": { "type": "string", "description": "Pilot rank title." },
+        "equippedSkin": { "type": "string", "description": "Equipped Star-Cannon skin." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp of last ranking sync." }
+      },
+      "required": [
+        "userId",
+        "displayName",
+        "endlessHighScore",
+        "blitzHighScore",
+        "totalStars",
+        "pilotRankNumber",
+        "pilotRankTitle",
+        "equippedSkin",
         "updatedAt"
       ]
     },
@@ -76,11 +111,11 @@
     },
     "GameRun": {
       "title": "GameRun",
-      "description": "Immutable record of a completed Saga, Endless, or Daily Challenge run.",
+      "description": "Immutable record of a completed Saga, Endless, Daily, or Blitz run.",
       "type": "object",
       "properties": {
-        "mode": { "type": "string", "enum": ["SAGA", "ENDLESS", "DAILY"], "description": "Game mode played." },
-        "levelNumber": { "type": "integer", "description": "Level number for SAGA, or 0 for ENDLESS/DAILY." },
+        "mode": { "type": "string", "enum": ["SAGA", "ENDLESS", "DAILY", "BLITZ"], "description": "Game mode played." },
+        "levelNumber": { "type": "integer", "description": "Level number for SAGA, or 0 for ENDLESS/DAILY/BLITZ." },
         "score": { "type": "integer", "description": "Final run score." },
         "maxCombo": { "type": "integer", "description": "Highest combo streak achieved." },
         "bubblesPopped": { "type": "integer", "description": "Total bubbles popped in this run." },
@@ -101,7 +136,7 @@
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/PlayerProfile" },
-      "description": "Player progression, Star Coins, daily streak, booster inventory, and preferences."
+      "description": "Player progression, Star Coins, daily streak, season pass, booster inventory, and preferences."
     },
     "/users/{userId}/levels/{levelId}": {
       "schema": { "$ref": "#/entities/LevelProgress" },
@@ -110,6 +145,10 @@
     "/users/{userId}/runs/{runId}": {
       "schema": { "$ref": "#/entities/GameRun" },
       "description": "Historical completed game runs for stats and personal records."
+    },
+    "/leaderboard/{userId}": {
+      "schema": { "$ref": "#/entities/LeaderboardEntry" },
+      "description": "Global pilot leaderboard rankings across Endless Panic, Cosmic Blitz, and Saga Stars."
     }
   }
 }

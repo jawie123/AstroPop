@@ -51,6 +51,7 @@ data class GameUiState(
     val thirdShot: LauncherShot = LauncherShot(BubbleColor.GOLD),
     val score: Long = 0L,
     val movesRemaining: Int = 18,
+    val blitzSecondsRemaining: Int = 120,
     val endlessShotsUntilDescent: Int = 5,
     val endlessWave: Int = 0,
     val comboStreak: Int = 0,
@@ -105,10 +106,12 @@ class GameViewModel(
     private var popupCounter = 0L
     private var resultSaved = false
     private var activeDayKey: String = ""
+    private var blitzTimerAccum = 0f
 
     companion object {
         private const val MAX_PARTICLES = 90
         const val SECOND_CHANCE_COST = 60L
+        const val BLITZ_DURATION_SECONDS = 120
     }
 
     fun syncProfileMetadata(profile: PlayerProfile?) {
@@ -127,21 +130,76 @@ class GameViewModel(
         }
     }
 
-    fun startSagaLevel(levelNumber: Int, profile: PlayerProfile?) {
+    fun startSagaLevel(
+        levelNumber: Int,
+        profile: PlayerProfile?,
+        starterBooster: BoosterType? = null,
+        starterAdFree: Boolean = false
+    ) {
         val spec = LevelCatalog.getLevel(levelNumber)
-        startBoardSession(GameMode.SAGA, spec, LevelCatalog.buildGridForLevel(spec), profile)
+        startBoardSession(
+            mode = GameMode.SAGA,
+            spec = spec,
+            initialGrid = LevelCatalog.buildGridForLevel(spec),
+            profile = profile,
+            starterBooster = starterBooster,
+            starterAdFree = starterAdFree
+        )
     }
 
-    fun startDailyChallenge(profile: PlayerProfile?) {
+    fun startDailyChallenge(
+        profile: PlayerProfile?,
+        starterBooster: BoosterType? = null,
+        starterAdFree: Boolean = false
+    ) {
         activeDayKey = LevelCatalog.todayKey()
         val spec = LevelCatalog.buildDailyChallengeSpec(activeDayKey)
-        startBoardSession(GameMode.DAILY, spec, LevelCatalog.buildGridForLevel(spec), profile)
+        startBoardSession(
+            mode = GameMode.DAILY,
+            spec = spec,
+            initialGrid = LevelCatalog.buildGridForLevel(spec),
+            profile = profile,
+            starterBooster = starterBooster,
+            starterAdFree = starterAdFree
+        )
     }
 
-    fun startEndlessMode(profile: PlayerProfile?) {
+    fun startEndlessMode(
+        profile: PlayerProfile?,
+        starterBooster: BoosterType? = null,
+        starterAdFree: Boolean = false
+    ) {
+        startArcadeSession(
+            mode = GameMode.ENDLESS,
+            profile = profile,
+            starterBooster = starterBooster,
+            starterAdFree = starterAdFree
+        )
+    }
+
+    fun startBlitzMode(
+        profile: PlayerProfile?,
+        starterBooster: BoosterType? = null,
+        starterAdFree: Boolean = false
+    ) {
+        startArcadeSession(
+            mode = GameMode.BLITZ,
+            profile = profile,
+            starterBooster = starterBooster,
+            starterAdFree = starterAdFree
+        )
+    }
+
+    private fun startArcadeSession(
+        mode: GameMode,
+        profile: PlayerProfile?,
+        starterBooster: BoosterType?,
+        starterAdFree: Boolean
+    ) {
         val initialGrid = LevelCatalog.buildEndlessStartGrid((System.currentTimeMillis() % 10000).toInt())
         val spec = LevelCatalog.getLevel(1)
         resultSaved = false
+        blitzTimerAccum = 0f
         syncProfileMetadata(profile)
         soundSynth.warmUp()
 
@@ -149,14 +207,15 @@ class GameViewModel(
         _renderState.value = RenderFrameState(grid = initialGrid)
         _state.update { prev ->
             prev.copy(
-                mode = GameMode.ENDLESS,
+                mode = mode,
                 levelSpec = spec,
                 currentShot = LauncherShot(colors.random()),
                 nextShot = LauncherShot(colors.random()),
                 thirdShot = LauncherShot(colors.random()),
                 score = 0L,
                 movesRemaining = 999,
-                endlessShotsUntilDescent = 5,
+                blitzSecondsRemaining = BLITZ_DURATION_SECONDS,
+                endlessShotsUntilDescent = if (mode == GameMode.BLITZ) 4 else 5,
                 endlessWave = 0,
                 comboStreak = 0,
                 maxCombo = 0,
@@ -175,11 +234,13 @@ class GameViewModel(
                 bossMaxHp = 0,
                 bossCounterCountdown = 0,
                 canBuySecondChance = false,
+                canWatchAdSecondChance = false,
                 usedSecondChance = false,
                 isDangerPanic = checkPanic(initialGrid),
                 syncErrorMessage = null
             )
         }
+        applyStarterBooster(starterBooster, starterAdFree)
         recomputeTrajectory()
         startGameLoop()
     }
@@ -188,11 +249,14 @@ class GameViewModel(
         mode: GameMode,
         spec: SagaLevelSpec,
         initialGrid: Map<Pair<Int, Int>, GridCell>,
-        profile: PlayerProfile?
+        profile: PlayerProfile?,
+        starterBooster: BoosterType?,
+        starterAdFree: Boolean
     ) {
         val starsTotal = initialGrid.values.count { it.kind == TileKind.STAR_CORE }
         val boss = spec.bossSpec
         resultSaved = false
+        blitzTimerAccum = 0f
         syncProfileMetadata(profile)
         soundSynth.warmUp()
 
@@ -207,6 +271,7 @@ class GameViewModel(
                 thirdShot = LauncherShot(colors.random()),
                 score = 0L,
                 movesRemaining = spec.movesLimit,
+                blitzSecondsRemaining = BLITZ_DURATION_SECONDS,
                 comboStreak = 0,
                 maxCombo = 0,
                 feverProgress = 0,
@@ -224,13 +289,31 @@ class GameViewModel(
                 bossMaxHp = boss?.maxHp ?: 0,
                 bossCounterCountdown = boss?.counterInterval ?: 0,
                 canBuySecondChance = false,
+                canWatchAdSecondChance = false,
                 usedSecondChance = false,
                 isDangerPanic = checkPanic(initialGrid),
                 syncErrorMessage = null
             )
         }
+        applyStarterBooster(starterBooster, starterAdFree)
         recomputeTrajectory()
         startGameLoop()
+    }
+
+    private fun applyStarterBooster(starterBooster: BoosterType?, starterAdFree: Boolean) {
+        if (starterBooster == null) return
+        if (starterAdFree) {
+            val shotType = when (starterBooster) {
+                BoosterType.BOMB -> ShotType.BOMB
+                BoosterType.PRISM -> ShotType.PRISM
+                BoosterType.LASER -> ShotType.LASER
+            }
+            _state.update { prev ->
+                prev.copy(currentShot = prev.currentShot.copy(shotType = shotType))
+            }
+        } else {
+            activateBooster(starterBooster)
+        }
     }
 
     fun updateArenaMetrics(width: Float, height: Float, topMargin: Float, shooterY: Float) {
@@ -506,7 +589,21 @@ class GameViewModel(
     }
 
     private fun tick(dt: Float) {
-        if (_state.value.status == GameStatus.PAUSED) return
+        val currentState = _state.value
+        if (currentState.status == GameStatus.PAUSED) return
+        if (currentState.mode == GameMode.BLITZ && currentState.status == GameStatus.PLAYING) {
+            blitzTimerAccum += dt
+            if (blitzTimerAccum >= 1f) {
+                val ticks = blitzTimerAccum.toInt()
+                blitzTimerAccum -= ticks
+                val nextSec = (currentState.blitzSecondsRemaining - ticks).coerceAtLeast(0)
+                _state.update { it.copy(blitzSecondsRemaining = nextSec) }
+                if (nextSec == 0) {
+                    finalizeBlitzTimeUp()
+                    return
+                }
+            }
+        }
         val rf = _renderState.value
 
         var anyChange = false
@@ -851,6 +948,13 @@ class GameViewModel(
                         val nc = HexGridEngine.cellCenter(nKey.first, nKey.second, boardWidth, radius, topOffset)
                         spawnPopParticles(particles, nc, Color.White, 4)
                     }
+                    TileKind.SHIELDED -> {
+                        mutableGrid[nKey] = nCell.copy(kind = TileKind.NORMAL, wobble = 1f)
+                        rescuedOrCracked.add(nKey)
+                        val nc = HexGridEngine.cellCenter(nKey.first, nKey.second, boardWidth, radius, topOffset)
+                        spawnPopParticles(particles, nc, Color(0xFFE2E8F0), 6)
+                        popups.add(FloatingPopup(++popupCounter, nc.x, nc.y, "ARMOR CRACKED!", AstroCyan))
+                    }
                     TileKind.STAR_CORE -> {
                         mutableGrid.remove(nKey)
                         actuallyRemoved.add(nKey)
@@ -1017,10 +1121,19 @@ class GameViewModel(
                 )
             }
         } else {
-            if (!didClear) {
+            val dropInterval = if (s.mode == GameMode.BLITZ) 4 else 5
+            val lowestRow = newGrid.keys.maxOfOrNull { it.first } ?: -1
+            if (s.mode == GameMode.BLITZ && (newGrid.isEmpty() || lowestRow < 2)) {
+                nextShotsUntilDescent = dropInterval
+                nextWave++
+                shiftEndlessGridDown(newGrid, nextWave)
+                mutablePopups.add(
+                    FloatingPopup(++popupCounter, boardWidth / 2f, topOffset + 64f, "WAVE $nextWave INCOMING!", AstroGold)
+                )
+            } else if (!didClear) {
                 nextShotsUntilDescent--
                 if (nextShotsUntilDescent <= 0) {
-                    nextShotsUntilDescent = 5
+                    nextShotsUntilDescent = dropInterval
                     nextWave++
                     shiftEndlessGridDown(newGrid, nextWave)
                 }
@@ -1107,20 +1220,21 @@ class GameViewModel(
                 s.levelSpec.goal == LevelGoal.RESCUE_STARS -> starsLeft == 0 || newGrid.isEmpty()
                 else -> newGrid.isEmpty()
             }
-            GameMode.ENDLESS -> false
+            GameMode.ENDLESS, GameMode.BLITZ -> false
         }
 
         val isDefeat = when (s.mode) {
             GameMode.SAGA, GameMode.DAILY -> !isVictory && (dangerReached || nextMoves <= 0)
-            GameMode.ENDLESS -> dangerReached
+            GameMode.ENDLESS, GameMode.BLITZ -> dangerReached
         }
 
-        val moveBonus = if (isVictory && s.mode != GameMode.ENDLESS) nextMoves * 150L else 0L
-        val fireworksBonusCoins = if (isVictory && s.mode != GameMode.ENDLESS && nextMoves > 0) nextMoves * 3L else 0L
+        val isSagaOrDaily = s.mode == GameMode.SAGA || s.mode == GameMode.DAILY
+        val moveBonus = if (isVictory && isSagaOrDaily) nextMoves * 150L else 0L
+        val fireworksBonusCoins = if (isVictory && isSagaOrDaily && nextMoves > 0) nextMoves * 3L else 0L
         val finalScore = s.score + gainedScore + bossClearBonusScore + moveBonus
         val totalPopped = s.totalPoppedInRun + matchedCount
 
-        val allowed = if (s.mode == GameMode.ENDLESS) BubbleColor.entries else s.levelSpec.allowedColors
+        val allowed = if (isSagaOrDaily) s.levelSpec.allowedColors else BubbleColor.entries
         val activeColors = availableBoardColors(newGrid, allowed)
 
         val upcomingThird = if (feverBonusShot != null) {
@@ -1145,7 +1259,7 @@ class GameViewModel(
             else -> GameStatus.PLAYING
         }
 
-        val starsEarned = if (isVictory && s.mode != GameMode.ENDLESS) {
+        val starsEarned = if (isVictory && isSagaOrDaily) {
             val (s1, s2, s3) = s.levelSpec.starThresholds
             when {
                 finalScore >= s3 -> 3
@@ -1162,7 +1276,7 @@ class GameViewModel(
         val baseCoinsEarned = when {
             nextStatus == GameStatus.WON && s.mode == GameMode.DAILY -> 120L + starsEarned * 15L + fireworksBonusCoins
             nextStatus == GameStatus.WON && s.mode == GameMode.SAGA -> 35L + starsEarned * 15L + bossClearBonusCoins + fireworksBonusCoins
-            nextStatus == GameStatus.LOST && s.mode == GameMode.ENDLESS -> (totalPopped / 3L).coerceAtLeast(10L)
+            nextStatus == GameStatus.LOST && (s.mode == GameMode.ENDLESS || s.mode == GameMode.BLITZ) -> (totalPopped / 3L).coerceAtLeast(10L)
             nextStatus == GameStatus.LOST -> (totalPopped / 5L).coerceAtLeast(5L)
             else -> 0L
         }
@@ -1217,6 +1331,7 @@ class GameViewModel(
 
         val canAdSecondChance = nextStatus == GameStatus.LOST &&
             s.mode != GameMode.ENDLESS &&
+            s.mode != GameMode.BLITZ &&
             !dangerReached &&
             !s.usedSecondChance
         val canSecondChance = canAdSecondChance && s.starCoins >= SECOND_CHANCE_COST
@@ -1267,6 +1382,38 @@ class GameViewModel(
         }
     }
 
+    private fun finalizeBlitzTimeUp() {
+        val s = _state.value
+        if (s.status != GameStatus.PLAYING || s.mode != GameMode.BLITZ) return
+        soundSynth.playVictory()
+        val coinsEarned = (s.score / 110L).coerceIn(25L, 400L) + s.wellBonusCoins
+        val rf = _renderState.value
+        val particles = rf.particles.toMutableList()
+        val shockwaves = rf.shockwaves.toMutableList()
+        val popups = rf.popups.toMutableList()
+        spawnPopParticles(particles, shooterPos, AstroGold, 24, isStar = true)
+        shockwaves.add(ShockwaveFx(shooterPos, boardWidth * 0.6f, AstroGold))
+        popups.add(FloatingPopup(++popupCounter, shooterPos.x, shooterPos.y - 80f, "TIME UP! +${coinsEarned}c", AstroGold))
+        _renderState.value = rf.copy(
+            flyingBubble = null,
+            particles = particles.takeLast(MAX_PARTICLES),
+            shockwaves = shockwaves,
+            popups = popups
+        )
+        _state.update {
+            it.copy(
+                status = GameStatus.WON,
+                blitzSecondsRemaining = 0,
+                coinsEarnedThisRun = coinsEarned,
+                canBuySecondChance = false,
+                canWatchAdSecondChance = false
+            )
+        }
+        if (!resultSaved) {
+            saveRunNow(won = true)
+        }
+    }
+
     fun finalizeDefeatWithoutSecondChance() {
         if (!resultSaved && _state.value.status == GameStatus.LOST) {
             saveRunNow(won = false)
@@ -1304,6 +1451,12 @@ class GameViewModel(
                     bubblesPopped = s.totalPoppedInRun,
                     coinsEarned = s.coinsEarnedThisRun
                 )
+                GameMode.BLITZ -> store.recordBlitzResult(
+                    score = s.score,
+                    maxCombo = s.maxCombo,
+                    bubblesPopped = s.totalPoppedInRun,
+                    coinsEarned = s.coinsEarnedThisRun
+                )
             }
             if (result.isFailure) {
                 _state.update {
@@ -1333,7 +1486,12 @@ class GameViewModel(
         fallback: List<BubbleColor>
     ): List<BubbleColor> {
         val present = grid.values
-            .filter { it.kind == TileKind.NORMAL || it.kind == TileKind.ICE || it.kind == TileKind.CHAMELEON }
+            .filter {
+                it.kind == TileKind.NORMAL ||
+                    it.kind == TileKind.ICE ||
+                    it.kind == TileKind.SHIELDED ||
+                    it.kind == TileKind.CHAMELEON
+            }
             .map { it.color }
             .distinct()
         return if (present.isNotEmpty()) present else fallback

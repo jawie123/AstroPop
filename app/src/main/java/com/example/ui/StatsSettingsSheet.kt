@@ -64,6 +64,8 @@ fun StatsSettingsSheet(
     recentRuns: List<GameRun>,
     isGuest: Boolean,
     authError: String?,
+    showAdPrivacyOptions: Boolean = false,
+    onOpenAdPrivacyOptions: () -> Unit = {},
     onToggleSound: (Boolean) -> Unit,
     onToggleHaptics: (Boolean) -> Unit,
     onSignInWithGoogle: () -> Unit,
@@ -96,13 +98,13 @@ fun StatsSettingsSheet(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 StatChip(
-                    label = "Total Popped",
-                    value = "${profile?.totalBubblesPopped ?: 0}",
+                    label = "Endless Best",
+                    value = "${profile?.endlessHighScore ?: 0}",
                     modifier = Modifier.weight(1f)
                 )
                 StatChip(
-                    label = "Endless Best",
-                    value = "${profile?.endlessHighScore ?: 0}",
+                    label = "Blitz Best",
+                    value = "${profile?.blitzHighScore ?: 0}",
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -112,13 +114,13 @@ fun StatsSettingsSheet(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 StatChip(
-                    label = "Star Coins",
-                    value = "${profile?.starCoins ?: 0}",
+                    label = "Total Popped",
+                    value = "${profile?.totalBubblesPopped ?: 0}",
                     modifier = Modifier.weight(1f)
                 )
                 StatChip(
-                    label = "Daily Streak",
-                    value = "${profile?.dailyStreak ?: 0}d",
+                    label = "Star Coins",
+                    value = "${profile?.starCoins ?: 0}",
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -203,6 +205,7 @@ fun StatsSettingsSheet(
                         val runMode = run.resolvedMode()
                         val runTitle = when (runMode) {
                             GameMode.ENDLESS -> "Endless Panic"
+                            GameMode.BLITZ -> "Cosmic Blitz"
                             GameMode.DAILY -> "Daily Nebula"
                             GameMode.SAGA -> "Saga Stage ${run.levelNumber}"
                         }
@@ -232,7 +235,7 @@ fun StatsSettingsSheet(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    if (runMode != GameMode.ENDLESS && run.starsEarned > 0) {
+                                    if (runMode != GameMode.ENDLESS && runMode != GameMode.BLITZ && run.starsEarned > 0) {
                                         Icon(
                                             Icons.Rounded.Star,
                                             contentDescription = null,
@@ -304,6 +307,21 @@ fun StatsSettingsSheet(
                     Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null)
                     Spacer(modifier = Modifier.size(8.dp))
                     Text("Sign Out", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+            if (showAdPrivacyOptions) {
+                OutlinedButton(
+                    onClick = onOpenAdPrivacyOptions,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AstroGold),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("settings_ad_consent_button")
+                ) {
+                    Icon(Icons.Rounded.Shield, contentDescription = null)
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text("Ad Privacy & Consent Options", style = MaterialTheme.typography.labelLarge)
                 }
             }
             OutlinedButton(

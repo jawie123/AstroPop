@@ -1,6 +1,7 @@
 package com.example.game
 
 import com.example.ui.theme.AstroCyan
+import com.example.ui.theme.AstroGold
 import com.example.ui.theme.AstroMagenta
 import com.example.ui.theme.AstroViolet
 import java.util.Calendar
@@ -29,6 +30,7 @@ object LevelCatalog {
     // Pattern token legend:
     // C/M/G/E/V/R = normal color bubble
     // c/m/g/e/v/r = ICE-encased bubble (lowercase)
+    // AC/AM/...   = SHIELDED titanium armor bubble (2 hits / Bomb / Laser)
     // X           = STONE asteroid
     // S           = STAR_CORE rescue orb
     // L           = LIGHTNING row-zapper
@@ -345,6 +347,214 @@ object LevelCatalog {
                 " c m g e v r c "
             ),
             bossSpec = BossSpec("Void Leviathan", maxHp = 42, counterInterval = 3, accentColor = AstroViolet)
+        ),
+        SagaLevelSpec(
+            levelNumber = 19,
+            chapter = "Supernova Core",
+            title = "Titanium Gate",
+            subtitle = "Armor Shield bubbles need an adjacent pop to crack their shell!",
+            goal = LevelGoal.RESCUE_STARS,
+            movesLimit = 28,
+            starThresholds = Triple(4200, 6800, 9600),
+            allowedColors = listOf(BubbleColor.CYAN, BubbleColor.MAGENTA, BubbleColor.GOLD, BubbleColor.EMERALD, BubbleColor.VIOLET),
+            rowsPattern = listOf(
+                "C S M G E V S C",
+                " AC AM AG AE AV ",
+                "C M G E V C M G",
+                " M G E V C M G ",
+                "E V C M G E V C"
+            )
+        ),
+        SagaLevelSpec(
+            levelNumber = 20,
+            chapter = "Supernova Core",
+            title = "Plasma Foundry",
+            subtitle = "Ignite Lightning Zappers inside the shielded forge!",
+            goal = LevelGoal.RESCUE_STARS,
+            movesLimit = 28,
+            starThresholds = Triple(4500, 7200, 10200),
+            allowedColors = listOf(BubbleColor.CYAN, BubbleColor.MAGENTA, BubbleColor.GOLD, BubbleColor.EMERALD, BubbleColor.CORAL),
+            rowsPattern = listOf(
+                "R S C M G E S R",
+                " AR L AM AG L C ",
+                "C M AC AE AR M G",
+                " M G E R C M G ",
+                "E R C M G E R C"
+            )
+        ),
+        SagaLevelSpec(
+            levelNumber = 21,
+            chapter = "Supernova Core",
+            title = "Mirror Rift",
+            subtitle = "Warp Portals bypass twin Asteroid-Shield walls.",
+            goal = LevelGoal.RESCUE_STARS,
+            movesLimit = 29,
+            starThresholds = Triple(4800, 7600, 10800),
+            allowedColors = listOf(BubbleColor.CYAN, BubbleColor.MAGENTA, BubbleColor.GOLD, BubbleColor.VIOLET, BubbleColor.CORAL),
+            rowsPattern = listOf(
+                "S V C M G R V S",
+                " X P AC AM P X ",
+                "V C G R V C G R",
+                " v c g r v c g ",
+                "C M P . . G R V"
+            )
+        ),
+        SagaLevelSpec(
+            levelNumber = 22,
+            chapter = "Supernova Core",
+            title = "Gravity Furnace",
+            subtitle = "Detonate Black Holes to shatter entire Armor clusters!",
+            goal = LevelGoal.RESCUE_STARS,
+            movesLimit = 30,
+            starThresholds = Triple(5000, 8000, 11400),
+            allowedColors = listOf(BubbleColor.CYAN, BubbleColor.MAGENTA, BubbleColor.GOLD, BubbleColor.EMERALD, BubbleColor.VIOLET, BubbleColor.CORAL),
+            rowsPattern = listOf(
+                "C S G E V R S M",
+                " AC B AG AE B V ",
+                "M G E V R C M G",
+                " c m g e v r c ",
+                "E V R C M G E V"
+            )
+        ),
+        SagaLevelSpec(
+            levelNumber = 23,
+            chapter = "Supernova Core",
+            title = "Prism Bastion",
+            subtitle = "Clear every armored and morphing core in the fortress!",
+            goal = LevelGoal.CLEAR_BOARD,
+            movesLimit = 30,
+            starThresholds = Triple(5200, 8400, 12000),
+            allowedColors = listOf(BubbleColor.CYAN, BubbleColor.MAGENTA, BubbleColor.GOLD, BubbleColor.EMERALD, BubbleColor.VIOLET, BubbleColor.CORAL),
+            rowsPattern = listOf(
+                "AC AM AG AE AV AR C M",
+                " C H M G H E V ",
+                "M G E V R C M G",
+                " g e L r c L m ",
+                "E V R C M G E V"
+            )
+        ),
+        SagaLevelSpec(
+            levelNumber = 24,
+            chapter = "Supernova Core",
+            title = "BOSS: Solar Titan",
+            subtitle = "Armored Guardian! Blast top clusters to break its 52 HP core!",
+            goal = LevelGoal.RESCUE_STARS,
+            movesLimit = 32,
+            starThresholds = Triple(5800, 9200, 13000),
+            allowedColors = listOf(BubbleColor.CYAN, BubbleColor.MAGENTA, BubbleColor.GOLD, BubbleColor.EMERALD, BubbleColor.VIOLET, BubbleColor.CORAL),
+            rowsPattern = listOf(
+                "S G R S S R G S",
+                " AG AR AC AM AE ",
+                "X B G L L G B X",
+                " g r c H c r g ",
+                "C M G E V R C M",
+                " M G E V R C M "
+            ),
+            bossSpec = BossSpec("Solar Titan", maxHp = 52, counterInterval = 3, accentColor = AstroGold)
+        ),
+        SagaLevelSpec(
+            levelNumber = 25,
+            chapter = "Supernova Core",
+            title = "Chrono Storm",
+            subtitle = "Fast combos & Lightning chains light up the outer corona.",
+            goal = LevelGoal.RESCUE_STARS,
+            movesLimit = 30,
+            starThresholds = Triple(5600, 8900, 12600),
+            allowedColors = listOf(BubbleColor.CYAN, BubbleColor.MAGENTA, BubbleColor.GOLD, BubbleColor.EMERALD, BubbleColor.VIOLET, BubbleColor.CORAL),
+            rowsPattern = listOf(
+                "C S M G E V S R",
+                " c L AC AM L r ",
+                "M G E V R C M G",
+                " AC AG AE AV AR ",
+                "E V R C M G E V"
+            )
+        ),
+        SagaLevelSpec(
+            levelNumber = 26,
+            chapter = "Supernova Core",
+            title = "Nebula Crucible",
+            subtitle = "Ice-locked and titanium-armored rings protect 4 Star Cores.",
+            goal = LevelGoal.RESCUE_STARS,
+            movesLimit = 32,
+            starThresholds = Triple(6000, 9500, 13400),
+            allowedColors = listOf(BubbleColor.CYAN, BubbleColor.MAGENTA, BubbleColor.GOLD, BubbleColor.EMERALD, BubbleColor.VIOLET, BubbleColor.CORAL),
+            rowsPattern = listOf(
+                "S C M S S G E S",
+                " AC m AG e AV r ",
+                "M X B L L B X R",
+                " c g H v r H m ",
+                "G E V R C M G E"
+            )
+        ),
+        SagaLevelSpec(
+            levelNumber = 27,
+            chapter = "Supernova Core",
+            title = "Twin Horizons",
+            subtitle = "Ride double Portals into chained Black Hole detonations.",
+            goal = LevelGoal.RESCUE_STARS,
+            movesLimit = 32,
+            starThresholds = Triple(6300, 9900, 14000),
+            allowedColors = listOf(BubbleColor.CYAN, BubbleColor.MAGENTA, BubbleColor.GOLD, BubbleColor.EMERALD, BubbleColor.VIOLET, BubbleColor.CORAL),
+            rowsPattern = listOf(
+                "S R V C C V R S",
+                " X P B AM B P X ",
+                "R V C G E M R V",
+                " AR AG AC AE AV ",
+                "C M G P . E R V"
+            )
+        ),
+        SagaLevelSpec(
+            levelNumber = 28,
+            chapter = "Supernova Core",
+            title = "Starlight Vault",
+            subtitle = "Cut the top asteroid anchors to drop the armored vault!",
+            goal = LevelGoal.RESCUE_STARS,
+            movesLimit = 32,
+            starThresholds = Triple(6600, 10400, 14600),
+            allowedColors = listOf(BubbleColor.CYAN, BubbleColor.MAGENTA, BubbleColor.GOLD, BubbleColor.EMERALD, BubbleColor.VIOLET, BubbleColor.CORAL),
+            rowsPattern = listOf(
+                "C M G E V R C M",
+                " S X AC AM X S ",
+                "E V X L L X R C",
+                " AG AE AV AR AC ",
+                "M G E V R C M G"
+            )
+        ),
+        SagaLevelSpec(
+            levelNumber = 29,
+            chapter = "Supernova Core",
+            title = "Hypernova Gauntlet",
+            subtitle = "Clear the entire Supernova Citadel before the final boss!",
+            goal = LevelGoal.CLEAR_BOARD,
+            movesLimit = 34,
+            starThresholds = Triple(7000, 11000, 15500),
+            allowedColors = listOf(BubbleColor.CYAN, BubbleColor.MAGENTA, BubbleColor.GOLD, BubbleColor.EMERALD, BubbleColor.VIOLET, BubbleColor.CORAL),
+            rowsPattern = listOf(
+                "AC AM AG AE AV AR C M",
+                " c B g H e B v ",
+                "M G L V R L C M",
+                " AG AC AM AE AR ",
+                "E V R C M G E V"
+            )
+        ),
+        SagaLevelSpec(
+            levelNumber = 30,
+            chapter = "Supernova Core",
+            title = "BOSS: Omega Singularity",
+            subtitle = "Ultimate Galactic Boss! 65 HP Shield, Portals, Armor & x5 Overdrive!",
+            goal = LevelGoal.RESCUE_STARS,
+            movesLimit = 36,
+            starThresholds = Triple(8000, 12500, 17500),
+            allowedColors = listOf(BubbleColor.CYAN, BubbleColor.MAGENTA, BubbleColor.GOLD, BubbleColor.EMERALD, BubbleColor.VIOLET, BubbleColor.CORAL),
+            rowsPattern = listOf(
+                "S C M S S G E S",
+                " AC P B AG B P ",
+                "X AM L AV AR L X",
+                " r c H g H e v ",
+                "C M G E V R C M",
+                " ac am ag ae av r "
+            ),
+            bossSpec = BossSpec("Omega Singularity", maxHp = 65, counterInterval = 3, accentColor = AstroMagenta)
         )
     )
 
@@ -419,14 +629,22 @@ object LevelCatalog {
             val maxCols = HexGridEngine.colsForRow(row)
             tokens.take(maxCols).forEachIndexed { col, token ->
                 val ch = token.first()
-                when (ch) {
-                    '.' -> Unit
-                    'X' -> grid[row to col] = GridCell(row, col, BubbleColor.VIOLET, TileKind.STONE)
-                    'S' -> grid[row to col] = GridCell(row, col, BubbleColor.GOLD, TileKind.STAR_CORE)
-                    'L' -> grid[row to col] = GridCell(row, col, BubbleColor.CYAN, TileKind.LIGHTNING)
-                    'H' -> grid[row to col] = GridCell(row, col, spec.allowedColors[(row + col) % spec.allowedColors.size], TileKind.CHAMELEON)
-                    'B' -> grid[row to col] = GridCell(row, col, BubbleColor.VIOLET, TileKind.BLACK_HOLE, charge = 0)
-                    'P' -> grid[row to col] = GridCell(row, col, BubbleColor.MAGENTA, TileKind.PORTAL)
+                when {
+                    token == "." -> Unit
+                    token.length == 2 && token[0].uppercaseChar() == 'A' -> {
+                        val color = BubbleColor.fromCode(token[1]) ?: spec.allowedColors.first()
+                        grid[row to col] = GridCell(row, col, color, TileKind.SHIELDED)
+                    }
+                    token.length == 2 -> {
+                        val color = BubbleColor.fromCode(token[1]) ?: spec.allowedColors.first()
+                        grid[row to col] = GridCell(row, col, color, TileKind.ICE)
+                    }
+                    ch == 'X' -> grid[row to col] = GridCell(row, col, BubbleColor.VIOLET, TileKind.STONE)
+                    ch == 'S' -> grid[row to col] = GridCell(row, col, BubbleColor.GOLD, TileKind.STAR_CORE)
+                    ch == 'L' -> grid[row to col] = GridCell(row, col, BubbleColor.CYAN, TileKind.LIGHTNING)
+                    ch == 'H' -> grid[row to col] = GridCell(row, col, spec.allowedColors[(row + col) % spec.allowedColors.size], TileKind.CHAMELEON)
+                    ch == 'B' -> grid[row to col] = GridCell(row, col, BubbleColor.VIOLET, TileKind.BLACK_HOLE, charge = 0)
+                    ch == 'P' -> grid[row to col] = GridCell(row, col, BubbleColor.MAGENTA, TileKind.PORTAL)
                     else -> {
                         val color = BubbleColor.fromCode(ch) ?: spec.allowedColors.first()
                         val kind = if (ch.isLowerCase()) TileKind.ICE else TileKind.NORMAL
@@ -490,8 +708,9 @@ object LevelCatalog {
                     waveIndex > 0 && waveIndex % 3 == 0 && row == 0 && col == 3 -> TileKind.BLACK_HOLE
                     waveIndex >= 2 && roll < 7 -> TileKind.STONE
                     waveIndex >= 1 && roll == 7 -> TileKind.LIGHTNING
-                    waveIndex >= 1 && roll in 8..17 -> TileKind.ICE
-                    waveIndex >= 3 && roll == 18 -> TileKind.CHAMELEON
+                    waveIndex >= 1 && roll in 8..16 -> TileKind.ICE
+                    waveIndex >= 2 && roll in 17..22 -> TileKind.SHIELDED
+                    waveIndex >= 3 && roll == 23 -> TileKind.CHAMELEON
                     else -> TileKind.NORMAL
                 }
                 val color = if (kind == TileKind.STONE || kind == TileKind.BLACK_HOLE) BubbleColor.VIOLET else palette[rng.nextInt(palette.size)]

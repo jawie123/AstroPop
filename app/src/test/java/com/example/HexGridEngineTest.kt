@@ -3,6 +3,9 @@ package com.example
 import com.example.game.BubbleColor
 import com.example.game.GridCell
 import com.example.game.HexGridEngine
+import com.example.game.LevelCatalog
+import com.example.game.LevelGoal
+import com.example.game.SagaLevelSpec
 import com.example.game.ShotType
 import com.example.game.TileKind
 import org.junit.Assert.assertEquals
@@ -162,5 +165,46 @@ class HexGridEngineTest {
         )
         assertTrue(trajNoMatch.snapCell != null)
         assertTrue(trajNoMatch.highlightCells.isEmpty())
+    }
+
+    @Test
+    fun shieldedTiles_doNotJoinColorMatchClusterUntilCracked() {
+        val grid = mapOf(
+            (0 to 0) to GridCell(0, 0, BubbleColor.CYAN),
+            (0 to 1) to GridCell(0, 1, BubbleColor.CYAN),
+            (1 to 0) to GridCell(1, 0, BubbleColor.CYAN, TileKind.SHIELDED)
+        )
+        val cluster = HexGridEngine.findColorMatchCluster(0, 0, BubbleColor.CYAN, grid)
+        assertEquals(setOf(0 to 0, 0 to 1), cluster)
+    }
+
+    @Test
+    fun levelCatalog_has30StagesAcross4SectorsWithSupernovaBossesAndShieldedTokens() {
+        val levels = LevelCatalog.sagaLevels
+        assertEquals(30, levels.size)
+        assertEquals((1..30).toList(), levels.map { it.levelNumber })
+        assertEquals("Supernova Core", LevelCatalog.getLevel(19).chapter)
+        assertEquals("Solar Titan", LevelCatalog.getLevel(24).bossSpec?.name)
+        assertEquals(52, LevelCatalog.getLevel(24).bossSpec?.maxHp)
+        assertEquals("Omega Singularity", LevelCatalog.getLevel(30).bossSpec?.name)
+        assertEquals(65, LevelCatalog.getLevel(30).bossSpec?.maxHp)
+
+        val customSpec = SagaLevelSpec(
+            levelNumber = 99,
+            chapter = "Test",
+            title = "Shield Test",
+            subtitle = "Test",
+            goal = LevelGoal.CLEAR_BOARD,
+            movesLimit = 10,
+            starThresholds = Triple(100, 200, 300),
+            allowedColors = listOf(BubbleColor.CYAN, BubbleColor.MAGENTA),
+            rowsPattern = listOf("AC AM C")
+        )
+        val parsed = LevelCatalog.buildGridForLevel(customSpec)
+        assertEquals(TileKind.SHIELDED, parsed[0 to 0]?.kind)
+        assertEquals(BubbleColor.CYAN, parsed[0 to 0]?.color)
+        assertEquals(TileKind.SHIELDED, parsed[0 to 1]?.kind)
+        assertEquals(BubbleColor.MAGENTA, parsed[0 to 1]?.color)
+        assertEquals(TileKind.NORMAL, parsed[0 to 2]?.kind)
     }
 }

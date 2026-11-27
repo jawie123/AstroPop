@@ -126,8 +126,10 @@ private fun AstroPopPlayFlow(
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
     val soundSynth = remember { SoundSynth() }
-    val adsManager = remember(context) { AstroAdsManager(context).apply { initialize() } }
+    val adsManager = remember(context) { AstroAdsManager(context).apply { initialize(activity) } }
     val isRewardedAdReady by adsManager.isRewardedReady.collectAsStateWithLifecycle()
+    val canRequestAds by adsManager.canRequestAds.collectAsStateWithLifecycle()
+    val isPrivacyOptionsRequired by adsManager.isPrivacyOptionsRequired.collectAsStateWithLifecycle()
 
     val progressStore = remember(sessionKey, isGuest) {
         if (isGuest) {
@@ -160,6 +162,7 @@ private fun AstroPopPlayFlow(
     val profileState by profileViewModel.profileState.collectAsStateWithLifecycle()
     val levelsState by profileViewModel.levelsState.collectAsStateWithLifecycle()
     val runsState by profileViewModel.runsState.collectAsStateWithLifecycle()
+    val leaderboardState by profileViewModel.leaderboardState.collectAsStateWithLifecycle()
     val shopFeedback by profileViewModel.shopFeedback.collectAsStateWithLifecycle()
 
     val profile = (profileState as? UiState.Success)?.data
@@ -188,28 +191,36 @@ private fun AstroPopPlayFlow(
         SagaHomeScreen(
             profile = profile,
             levels = levels,
+            leaderboardState = leaderboardState,
             isGuest = isGuest,
             errorMessage = errorMsg,
             shopFeedback = shopFeedback,
             isRewardedAdReady = isRewardedAdReady,
-            onPlaySagaLevel = { levelNum ->
+            canRequestAds = canRequestAds,
+            onPlaySagaLevel = { levelNum, booster, adFree ->
                 activeLevel = levelNum
                 activeMode = GameMode.SAGA
-                gameViewModel.startSagaLevel(levelNum, profile)
+                gameViewModel.startSagaLevel(levelNum, profile, booster, adFree)
             },
-            onPlayDaily = {
+            onPlayDaily = { booster, adFree ->
                 activeMode = GameMode.DAILY
-                gameViewModel.startDailyChallenge(profile)
+                gameViewModel.startDailyChallenge(profile, booster, adFree)
             },
-            onPlayEndless = {
+            onPlayEndless = { booster, adFree ->
                 activeMode = GameMode.ENDLESS
-                gameViewModel.startEndlessMode(profile)
+                gameViewModel.startEndlessMode(profile, booster, adFree)
+            },
+            onPlayBlitz = { booster, adFree ->
+                activeMode = GameMode.BLITZ
+                gameViewModel.startBlitzMode(profile, booster, adFree)
             },
             onPurchaseBooster = profileViewModel::purchaseBooster,
             onUnlockOrEquipSkin = profileViewModel::unlockOrEquipSkin,
             onClaimQuest = profileViewModel::claimQuest,
             onClaimDailySupply = profileViewModel::claimDailySupply,
             onClaimWheelPrize = profileViewModel::claimWheelPrize,
+            onClaimPassReward = profileViewModel::claimPassReward,
+            onOpenMysteryChest = profileViewModel::openMysteryChest,
             onWatchAdForCoins = {
                 adsManager.showRewarded(
                     activity = activity,
@@ -221,6 +232,27 @@ private fun AstroPopPlayFlow(
                 adsManager.showRewarded(
                     activity = activity,
                     onRewardEarned = onSpinUnlocked,
+                    onUnavailable = { profileViewModel.reportAdFeedback("Ad still loading, please try again shortly.") }
+                )
+            },
+            onWatchAdForChest = { onChestUnlocked ->
+                adsManager.showRewarded(
+                    activity = activity,
+                    onRewardEarned = onChestUnlocked,
+                    onUnavailable = { profileViewModel.reportAdFeedback("Ad still loading, please try again shortly.") }
+                )
+            },
+            onWatchAdForPassBonus = { onBonusUnlocked ->
+                adsManager.showRewarded(
+                    activity = activity,
+                    onRewardEarned = onBonusUnlocked,
+                    onUnavailable = { profileViewModel.reportAdFeedback("Ad still loading, please try again shortly.") }
+                )
+            },
+            onWatchAdForStarterBomb = { onStarterUnlocked ->
+                adsManager.showRewarded(
+                    activity = activity,
+                    onRewardEarned = onStarterUnlocked,
                     onUnavailable = { profileViewModel.reportAdFeedback("Ad still loading, please try again shortly.") }
                 )
             },
@@ -257,6 +289,7 @@ private fun AstroPopPlayFlow(
                     when (activeMode) {
                         GameMode.SAGA -> gameViewModel.startSagaLevel(activeLevel, profile)
                         GameMode.DAILY -> gameViewModel.startDailyChallenge(profile)
+                        GameMode.BLITZ -> gameViewModel.startBlitzMode(profile)
                         GameMode.ENDLESS, null -> gameViewModel.startEndlessMode(profile)
                     }
                 }
@@ -270,6 +303,8 @@ private fun AstroPopPlayFlow(
             recentRuns = runs,
             isGuest = isGuest,
             authError = guestAuthError,
+            showAdPrivacyOptions = isPrivacyOptionsRequired,
+            onOpenAdPrivacyOptions = { adsManager.showPrivacyOptionsForm(activity) },
             onToggleSound = { enabled ->
                 soundSynth.enabled = enabled
                 profileViewModel.updatePreferences(
